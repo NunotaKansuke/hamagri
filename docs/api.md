@@ -18,9 +18,8 @@ memory-mapped. `Maps` remains as a compatibility alias; new code should use
 atlas, their order follows the bucket entries in the root manifest; it is not
 necessarily ascending by numeric map ID.
 
-The version-1 manifests identify their format with historical `hammlet-*`
-strings. These are on-disk format identifiers and are retained so the released
-atlas can be read without rewriting 72 GB of data.
+Version-1 manifests use `hamagri-*` format and angle-convention identifiers.
+The software and distributed atlas use the same manifest schema.
 
 ## Reconstruct magnification
 

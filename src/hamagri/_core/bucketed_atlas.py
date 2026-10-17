@@ -19,7 +19,7 @@ import numpy as np
 
 from .atlas import PolarAtlas
 
-_FORMAT = "hammlet-bucketed-fourier-maps"
+_FORMAT = "hamagri-bucketed-fourier-maps"
 _VERSION = 1
 
 
@@ -51,7 +51,7 @@ class BucketedPolarAtlas:
     """Read a validated collection of parameter-space-bucketed polar atlases.
 
     The parent ``manifest.json`` has format
-    ``hammlet-bucketed-fourier-maps`` version 1. Every entry in ``buckets``
+    ``hamagri-bucketed-fourier-maps`` version 1. Every entry in ``buckets``
     contains ``name``, relative ``path``, ``count``, ``logs`` and ``logq``.
     Bounds are inclusive and represented as two-element
     ``[minimum, maximum]`` arrays.
