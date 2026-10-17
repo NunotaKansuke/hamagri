@@ -38,7 +38,9 @@ def _spectrum_config(config: MapConfig) -> DirectSpectrumConfig:
         caustic_local_levels=config.caustic_local_levels,
         caustic_points_per_side=config.caustic_points_per_side,
         diagnostic_m_max=config.diagnostic_m_max,
-        radial_certificate_levels=config.radial_certificate_levels,
+        radial_certificate_levels=1,
+        build_radial_certificate=False,
+        store_certificate_arrays=False,
     )
 
 
@@ -55,6 +57,7 @@ def _specs(rows: np.ndarray, config: MapConfig) -> Iterable[MapBuildSpec]:
                 10.0**logrho,
                 tolerance=config.vbm_tolerance,
                 relative_tolerance=config.vbm_relative_tolerance,
+                coordinate_frame=config.coordinate_frame,
             ),
         )
 
@@ -99,6 +102,7 @@ def _pilot_evaluators(rows: np.ndarray, config: MapConfig):
             10.0**logrho,
             tolerance=config.vbm_tolerance,
             relative_tolerance=config.vbm_relative_tolerance,
+            coordinate_frame=config.coordinate_frame,
         )
         for _, logs, logq, logrho in pilot_rows
     ]
@@ -135,12 +139,20 @@ def build_maps(
     if destination.exists():
         raise FileExistsError(f"map destination already exists: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_name(f".{destination.name}.partial-{os.getpid()}")
-    if temporary.exists():
-        raise FileExistsError(f"stale partial output exists: {temporary}")
+    partials = sorted(destination.parent.glob(f".{destination.name}.partial-*"))
+    if len(partials) > 1:
+        raise FileExistsError(
+            f"multiple partial outputs exist for {destination}: {partials}"
+        )
+    if partials:
+        temporary = partials[0]
+        resume = True
+    else:
+        temporary = destination.with_name(f".{destination.name}.partial-{os.getpid()}")
+        resume = False
+        temporary.mkdir(parents=True)
 
     try:
-        temporary.mkdir(parents=True)
         entries = []
         selected_ids: list[int] = []
         for bucket in buckets:
@@ -161,8 +173,14 @@ def build_maps(
                 radial_nodes,
                 spectrum_config=_spectrum_config(config),
                 shard_size=config.shard_size,
+                coordinate_frame=config.coordinate_frame,
             )
-            builder.build(child, _specs(rows, config), progress_every=progress_every)
+            builder.build(
+                child,
+                _specs(rows, config),
+                progress_every=progress_every,
+                resume=resume,
+            )
             np.save(child / "radial_pilot_map_ids.npy", pilot_rows[:, 0].astype(np.int64))
             np.save(child / "radial_pilot_radii.npy", pilot_radii)
             np.save(child / "radial_pilot_difficulty.npy", difficulty)
@@ -183,6 +201,7 @@ def build_maps(
             entries,
             {
                 "builder": "direct-vbm-rho-aware-adaptive-radial-fourier",
+                "coordinate_frame": config.coordinate_frame,
                 "radial_layout": {
                     "s_buckets": config.radial_s_buckets,
                     "q_buckets": config.radial_q_buckets,
@@ -200,13 +219,13 @@ def build_maps(
             "partition": asdict(partition),
             "selected_map_ids": sorted(selected_ids),
         }
-        (temporary / "hammlet-build.json").write_text(
+        (temporary / "hamagri-build.json").write_text(
             json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
         )
         temporary.replace(destination)
     except BaseException:
-        if temporary.exists():
-            shutil.rmtree(temporary)
+        # Keep the partial tree as a checkpoint.  The next invocation reuses
+        # durable map shards and only evaluates map IDs not already present.
         raise
     return destination
 
@@ -217,14 +236,24 @@ def merge_maps(output: str | Path, *, destination: str | Path | None = None) -> 
     parts = sorted((output / "parts").glob("part-*-of-*"))
     if not parts:
         raise FileNotFoundError(f"no parts found below {output / 'parts'}")
-    records = [json.loads((part / "hammlet-build.json").read_text()) for part in parts]
+    records = [json.loads((part / "hamagri-build.json").read_text()) for part in parts]
     expected = int(records[0]["partition"]["count"])
     indices = [int(record["partition"]["index"]) for record in records]
     if len(parts) != expected or indices != list(range(expected)):
         raise ValueError(f"expected all partition indices 0..{expected - 1}; got {indices}")
     if any(record["grid"] != records[0]["grid"] for record in records[1:]):
         raise ValueError("parts were generated from different parameter grids")
-    if any(record["config"] != records[0]["config"] for record in records[1:]):
+    def merge_config(record: dict[str, object]) -> dict[str, object]:
+        # Shard size changes only the on-disk packing/checkpoint granularity;
+        # it does not change the generated coefficients.
+        config = dict(record["config"])
+        config.pop("shard_size", None)
+        return config
+
+    if any(
+        merge_config(record) != merge_config(records[0])
+        for record in records[1:]
+    ):
         raise ValueError("parts were generated with different map configs")
 
     destination = Path(destination or output / "maps").resolve()
@@ -273,7 +302,7 @@ def merge_maps(output: str | Path, *, destination: str | Path | None = None) -> 
                 ).get("radial_layout"),
             },
         )
-        (temporary / "hammlet-build.json").write_text(
+        (temporary / "hamagri-build.json").write_text(
             json.dumps(
                 {
                     **records[0],

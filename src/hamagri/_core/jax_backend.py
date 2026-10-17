@@ -255,8 +255,11 @@ class JAXConsistentGeometryBatchScanner:
         self.n_lag = int(arrays["square_lags"].shape[2])
         self.radial_order = self.n_lag - 1
         self.singular_rtol = float(singular_rtol)
-        if self.n_alpha // 2 < 2 * self.m_max:
-            raise ValueError("n_alpha must be at least 4*m_max")
+        from .nyquist import validate_quadratic_alpha_grid
+
+        validate_quadratic_alpha_grid(
+            self.n_alpha, self.m_max, parameter="n_alpha"
+        )
         self.product_grid_size = product_grid_size(self.m_max)
         self._compiled_scan = jax.jit(self._scan_impl)
         self._compiled_scan_minima = jax.jit(self._scan_minima_impl)

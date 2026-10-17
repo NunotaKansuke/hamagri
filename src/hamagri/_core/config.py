@@ -10,7 +10,7 @@ SearchMode = Literal["pspl", "hybrid", "caustic_clock", "auto"]
 
 @dataclass(frozen=True)
 class PSPLGeometry:
-    """Trajectory seed. Angles exposed by this package are in radians."""
+    """Trajectory seed; package angles are radians and coordinates are frame-tagged."""
 
     t0: Optional[float]
     u0: Optional[float]
@@ -18,6 +18,7 @@ class PSPLGeometry:
     covariance: Optional[np.ndarray] = None
     reliable: bool = True
     origin: Literal["pspl", "caustic_clock"] = "pspl"
+    coordinate_frame: Literal["native", "map"] = "native"
 
     def validate(self, require_timing: bool = True) -> None:
         values = (self.t0, self.u0, self.tE)
@@ -34,6 +35,8 @@ class PSPLGeometry:
                 raise ValueError("covariance must have shape (3, 3) for (t0, u0, log(tE))")
         if self.origin not in {"pspl", "caustic_clock"}:
             raise ValueError("origin must be 'pspl' or 'caustic_clock'")
+        if self.coordinate_frame not in {"native", "map"}:
+            raise ValueError("coordinate_frame must be 'native' or 'map'")
 
 
 @dataclass(frozen=True)
@@ -94,10 +97,11 @@ class BinaryAlphaFFTConfig:
             raise ValueError(f"unsupported mode: {self.mode}")
         if self.n_alpha < 4 or self.n_alpha % 2:
             raise ValueError("n_alpha must be an even integer >= 4")
-        if not 0 <= 2 * self.m_max <= self.n_alpha // 2:
-            raise ValueError(
-                "n_alpha must be at least 4*m_max so squared-map modes fit"
-            )
+        from .nyquist import validate_quadratic_alpha_grid
+
+        validate_quadratic_alpha_grid(
+            self.n_alpha, self.m_max, parameter="n_alpha"
+        )
         for name in (
             "radial_bins",
             "map_chunk_size",

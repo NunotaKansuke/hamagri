@@ -4,24 +4,22 @@ This document separates implemented guarantees from empirical acceptance tests.
 Passing these tests supports production seed-search use; it does not turn an
 empirical comparison into a mathematical certificate.
 
-## 1. Radial interpolation error
+## 1. Map reconstruction error
 
-The stored certificate now evaluates deterministic dyadic radial holdouts in
-every interval and propagates the linear/cubic interpolation envelope through
-the existing chi-square bounds. Its declared reference is piecewise linear
-between evaluated rings. Validation must measure how well that sampled
-reference represents direct VBM between those rings; a fully continuous proof
-still requires a solver-supplied radial derivative enclosure.
+The public atlas contains reconstruction-error and deviation-envelope
+diagnostics, but no chi-square certificate arrays. Measure map reconstruction
+against direct VBM at angular and radial locations that were not used to build
+the stored coefficients. Treat these as empirical validation, not a guarantee.
 
 Report at least:
 
 - maximum and quantiles of $|A_{\rm VBM}-A_{\rm map}|$ at radial holdouts;
 - the same residual normalized by photometric uncertainty along trajectories;
-- observed coverage of the resulting chi-square interval;
+- resulting light-curve chi-square differences at direct-evaluated seeds;
 - generation-time and search-time overhead separately.
 
-Hammlet must continue to describe its interval as conditional on the sampled
-radial representation.
+hamagri must not describe these empirical residual measurements as a formal
+chi-square error bound.
 
 ## 2. Caustic and small-source recall
 

@@ -152,7 +152,7 @@ def plot_vbm_comparison(
     absolute = np.abs(residual[finite])
     relative = absolute / np.maximum(np.abs(direct[finite]), 1.0)
     figure.suptitle(
-        "Resonant caustic: direct VBM versus Hammlet maps\n"
+        "Resonant caustic: direct VBM versus hamagri maps\n"
         f"s={s:g}, q={q:g}, rho={rho:g}; "
         f"median |residual|={np.median(absolute):.3g}, "
         f"99% relative={np.percentile(relative, 99):.2%}",

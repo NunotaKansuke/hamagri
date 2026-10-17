@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from hammlet import MapConfig, Maps, ParameterGrid, build_maps
-from hammlet.plot import plot_vbm_comparison
+from hamagri import Atlas, MapConfig, ParameterGrid, build_maps
+from hamagri.plot import plot_vbm_comparison
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +23,7 @@ config = MapConfig(
 if not output.exists():
     build_maps(output, grid, config=config)
 
-maps = Maps.open(output)
+maps = Atlas.open(output)
 plot_vbm_comparison(
     maps,
     map_id=0,

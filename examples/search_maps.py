@@ -2,19 +2,26 @@
 
 import numpy as np
 
-from hammlet import Dataset, Geometry, Maps, SearchConfig
+from hamagri import Atlas, Dataset, Geometry, SearchConfig
 
 
-maps = Maps.open("maps")
+atlas = Atlas.open("maps")
 data = Dataset(
     time=np.loadtxt("lightcurve.dat")[:, 0],
     flux=np.loadtxt("lightcurve.dat")[:, 1],
     error=np.loadtxt("lightcurve.dat")[:, 2],
     name="survey",
 )
-result = maps.search(
+result = atlas.search(
     [data],
-    [Geometry(t0=2459000.0, u0=0.08, tE=24.0)],
+    [
+        Geometry(
+            t0=2459000.0,
+            u0=0.08,
+            tE=24.0,
+            coordinate_frame=atlas.coordinate_frame,
+        )
+    ],
     config=SearchConfig(candidate_count=300),
 )
 

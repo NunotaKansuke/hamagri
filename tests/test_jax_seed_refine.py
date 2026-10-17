@@ -3,18 +3,18 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from hammlet._core.config import PSPLGeometry
-from hammlet._core.crossing_clock import (
+from hamagri._core.config import PSPLGeometry
+from hamagri._core.crossing_clock import (
     evaluate_fixed_alpha_lowpass,
     fixed_alpha_coefficient_chi2,
 )
-from hammlet._core.jax_seed_refine import (
+from hamagri._core.jax_seed_refine import (
     JAXFixedAlphaBatchEvaluator,
     batched_pairwise_refine,
     batched_pattern_refine,
     evaluate_in_fixed_batches,
 )
-from hammlet._core.trajectory import PhotometricDataset
+from hamagri._core.trajectory import PhotometricDataset
 
 
 def _problem():

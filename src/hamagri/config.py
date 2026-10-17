@@ -19,15 +19,46 @@ def _axis(values: Iterable[float], name: str) -> np.ndarray:
 
 @dataclass(frozen=True)
 class ParameterGrid:
-    """Cartesian grid in physical ``s``, ``q`` and ``rho`` values."""
+    """Grid in physical ``s``, ``q`` and ``rho`` values.
+
+    ``active_sq_pairs`` optionally restricts the Cartesian product to a
+    deterministic subset of ``(s, q)`` cells while retaining every ``rho``
+    value in each selected cell.  This represents the parameter mask used by
+    AdaMGrid's default binary map set.
+    """
 
     s: tuple[float, ...]
     q: tuple[float, ...]
     rho: tuple[float, ...]
+    active_sq_pairs: tuple[tuple[int, int], ...] | None = None
 
     def __post_init__(self) -> None:
         for name in ("s", "q", "rho"):
             object.__setattr__(self, name, tuple(_axis(getattr(self, name), name)))
+        if self.active_sq_pairs is not None:
+            normalized: list[tuple[int, int]] = []
+            seen: set[tuple[int, int]] = set()
+            for pair in self.active_sq_pairs:
+                if len(pair) != 2:
+                    raise ValueError("active_sq_pairs entries must have length two")
+                s_index, q_index = pair
+                if (
+                    isinstance(s_index, bool)
+                    or isinstance(q_index, bool)
+                    or not isinstance(s_index, int)
+                    or not isinstance(q_index, int)
+                ):
+                    raise ValueError("active_sq_pairs indices must be integers")
+                if not 0 <= s_index < len(self.s) or not 0 <= q_index < len(self.q):
+                    raise ValueError("active_sq_pairs index is outside the grid axes")
+                normalized_pair = (s_index, q_index)
+                if normalized_pair in seen:
+                    raise ValueError("active_sq_pairs cannot contain duplicates")
+                seen.add(normalized_pair)
+                normalized.append(normalized_pair)
+            if not normalized:
+                raise ValueError("active_sq_pairs cannot be empty")
+            object.__setattr__(self, "active_sq_pairs", tuple(normalized))
 
     @classmethod
     def from_log10(
@@ -36,26 +67,85 @@ class ParameterGrid:
         log_s: Iterable[float],
         log_q: Iterable[float],
         log_rho: Iterable[float],
+        active_sq_pairs: Iterable[tuple[int, int]] | None = None,
     ) -> "ParameterGrid":
         return cls(
             tuple(10.0 ** np.asarray(tuple(log_s))),
             tuple(10.0 ** np.asarray(tuple(log_q))),
             tuple(10.0 ** np.asarray(tuple(log_rho))),
+            active_sq_pairs=active_sq_pairs,
+        )
+
+    @classmethod
+    def from_adamgrid_default(cls) -> "ParameterGrid":
+        """Reproduce AdaMGrid's released default binary map-set grid.
+
+        The upstream generator uses rounded inclusive decimal loops and then
+        keeps only the ``(logs, logq)`` cells satisfying its binary-lens
+        coverage condition.  Every retained cell receives all nine ``logrho``
+        values, yielding 33,993 rows.
+        """
+
+        log_s = tuple(round(-1.5 + 0.05 * index, 5) for index in range(61))
+        log_q = tuple(round(-6.0 + 0.1 * index, 5) for index in range(101))
+        log_rho = tuple(round(-4.0 + 0.3 * index, 5) for index in range(9))
+
+        active_pairs = []
+        for s_index, logs in enumerate(log_s):
+            for q_index, logq in enumerate(log_q):
+                q_positive_condition = (
+                    logq > 0.0
+                    and (10.0**logs) ** 2
+                    > (1.0 + (10.0 ** (-logq)) ** (1.0 / 3.0)) ** 3
+                    / (1.0 + 10.0 ** (-logq))
+                )
+                q_nonpositive_condition = (
+                    logq <= 0.0
+                    and (
+                        (logs <= 0.65 and -4.0 * abs(logs) + logq + 8.0 > 0.0)
+                        or (
+                            logs >= 0.70
+                            and -4.0 * abs(logs) + logq + 7.0 > 0.0
+                        )
+                    )
+                )
+                if q_positive_condition or q_nonpositive_condition:
+                    active_pairs.append((s_index, q_index))
+
+        return cls.from_log10(
+            log_s=log_s,
+            log_q=log_q,
+            log_rho=log_rho,
+            active_sq_pairs=active_pairs,
         )
 
     def table(self) -> np.ndarray:
         """Return stable rows ``(map_id, log10(s), log10(q), log10(rho))``."""
         rows = []
         map_id = 0
-        for s in self.s:
-            for q in self.q:
-                for rho in self.rho:
-                    rows.append((map_id, np.log10(s), np.log10(q), np.log10(rho)))
-                    map_id += 1
+        if self.active_sq_pairs is None:
+            pairs = (
+                (s_index, q_index)
+                for s_index in range(len(self.s))
+                for q_index in range(len(self.q))
+            )
+        else:
+            pairs = iter(self.active_sq_pairs)
+        for s_index, q_index in pairs:
+            s = self.s[s_index]
+            q = self.q[q_index]
+            for rho in self.rho:
+                rows.append((map_id, np.log10(s), np.log10(q), np.log10(rho)))
+                map_id += 1
         return np.asarray(rows, dtype=np.float64)
 
-    def to_dict(self) -> dict[str, list[float]]:
-        return {name: list(getattr(self, name)) for name in ("s", "q", "rho")}
+    def to_dict(self) -> dict[str, object]:
+        result: dict[str, object] = {
+            name: list(getattr(self, name)) for name in ("s", "q", "rho")
+        }
+        if self.active_sq_pairs is not None:
+            result["active_sq_pairs"] = [list(pair) for pair in self.active_sq_pairs]
+        return result
 
 
 @dataclass(frozen=True)
@@ -113,7 +203,7 @@ class MapConfig:
     radial_pilot_phi: int = 64
     radial_pilot_m_max: int = 24
     radial_adaptive_fraction: float = 0.65
-    radial_certificate_levels: int = 1
+    coordinate_frame: str = "map"
 
     def __post_init__(self) -> None:
         positive_ints = (
@@ -131,7 +221,6 @@ class MapConfig:
             "radial_pilot_bins",
             "radial_pilot_phi",
             "radial_pilot_m_max",
-            "radial_certificate_levels",
         )
         if any(int(getattr(self, name)) < 1 for name in positive_ints):
             raise ValueError("map generation counts and mode budgets must be positive")
@@ -145,8 +234,8 @@ class MapConfig:
             raise ValueError("radial_pilot_phi is too small for radial_pilot_m_max")
         if self.radial_max <= 0.0:
             raise ValueError("radial_max must be positive")
-        if self.radial_certificate_levels > 3:
-            raise ValueError("radial_certificate_levels cannot exceed three")
+        if self.coordinate_frame not in ("map", "native"):
+            raise ValueError("coordinate_frame must be 'map' or 'native'")
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -156,14 +245,13 @@ class MapConfig:
 class SearchConfig:
     base_m_max: int = 32
     full_m_max: int = 128
-    base_n_alpha: int = 128
-    full_n_alpha: int = 512
+    base_n_alpha: int = 144
+    full_n_alpha: int = 576
     top_count: int = 500
     risk_count: int = 500
     candidate_count: int = 300
     base_radial_order: int = 1
     full_radial_order: int = 3
-    certified_selection: bool = True
     shards_per_call: int = 4
     handoff_m_max: int = 512
     cluster_log_s: float = 0.075
@@ -184,10 +272,14 @@ class SearchConfig:
     def __post_init__(self) -> None:
         if not 0 <= self.base_m_max < self.full_m_max <= self.handoff_m_max:
             raise ValueError("require base_m_max < full_m_max <= handoff_m_max")
-        if self.base_n_alpha < 4 * self.base_m_max:
-            raise ValueError("base_n_alpha must be at least 4*base_m_max")
-        if self.full_n_alpha < 4 * self.full_m_max:
-            raise ValueError("full_n_alpha must be at least 4*full_m_max")
+        from ._core.nyquist import validate_quadratic_alpha_grid
+
+        validate_quadratic_alpha_grid(
+            self.base_n_alpha, self.base_m_max, parameter="base_n_alpha"
+        )
+        validate_quadratic_alpha_grid(
+            self.full_n_alpha, self.full_m_max, parameter="full_n_alpha"
+        )
         if self.full_n_alpha % self.base_n_alpha:
             raise ValueError("full_n_alpha must be a multiple of base_n_alpha")
         if self.base_radial_order not in (1, 3) or self.full_radial_order not in (1, 3):

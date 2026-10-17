@@ -42,8 +42,6 @@ class Candidate:
     alpha: float
     geometry_index: int
     chi2: float
-    chi2_lower: float
-    chi2_upper: float
     spectral_risk: float
     t0: float
     u0: float
@@ -245,6 +243,21 @@ def search(
     datasets, geometries = tuple(datasets), tuple(geometries)
     if not datasets or not geometries:
         raise ValueError("at least one dataset and one geometry are required")
+    if maps.coordinate_frame is None:
+        raise ValueError(
+            "the atlas does not declare a recognized coordinate frame; search "
+            "requires manifest coordinate_frame='map' or 'native' metadata"
+        )
+    for geometry in geometries:
+        geometry.validate()
+        if geometry.coordinate_frame != maps.coordinate_frame:
+            raise ValueError(
+                f"geometry uses the {geometry.coordinate_frame!r} coordinate "
+                f"frame but the atlas uses {maps.coordinate_frame!r}; convert "
+                "the trajectory first. The native-to-map shift depends on "
+                "(s, q, alpha), so hamagri cannot convert it once for an "
+                "atlas-wide FFT scan."
+            )
     if config.full_m_max > maps.m_max:
         raise ValueError("full_m_max exceeds the modes stored in these maps")
     if maps._bucketed:
@@ -265,7 +278,7 @@ def search(
             risk_count=config.risk_count,
             shards_per_call=config.shards_per_call,
             base_radial_order=config.base_radial_order,
-            certified_selection=config.certified_selection,
+            certified_selection=False,
         )
     else:
         nodes = maps.radial_nodes
@@ -298,7 +311,7 @@ def search(
             top_count=config.top_count,
             risk_count=config.risk_count,
             shards_per_call=config.shards_per_call,
-            certified_selection=config.certified_selection,
+            certified_selection=False,
         )
     records = raw.candidates(
         n_alpha=config.full_n_alpha,
@@ -353,8 +366,6 @@ def search(
                 alpha=float(fit_parameters[3] % (2.0 * np.pi)),
                 geometry_index=item.geometry_index,
                 chi2=chi2,
-                chi2_lower=float(item.chi2_lower),
-                chi2_upper=float(item.chi2_upper),
                 spectral_risk=item.spectral_risk,
                 t0=float(fit_parameters[0]),
                 u0=float(fit_parameters[1]),

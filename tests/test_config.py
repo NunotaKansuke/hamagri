@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from hammlet import ParameterGrid, Partition
-from hammlet.config import default_radial_nodes
+from hamagri import ParameterGrid, Partition, SearchConfig
+from hamagri.config import default_radial_nodes
 
 
 def test_parameter_grid_has_stable_order():
@@ -11,6 +11,28 @@ def test_parameter_grid_has_stable_order():
     assert table.shape == (4, 4)
     np.testing.assert_array_equal(table[:, 0], np.arange(4))
     np.testing.assert_allclose(table[2, 1:], np.log10([1.2, 1e-4, 1e-3]))
+
+
+def test_adamgrid_default_matches_released_map_count():
+    grid = ParameterGrid.from_adamgrid_default()
+    table = grid.table()
+    assert len(grid.active_sq_pairs) == 3777
+    assert table.shape == (33993, 4)
+    np.testing.assert_array_equal(table[:, 0], np.arange(33993))
+    np.testing.assert_allclose(table[:9, 1:], np.column_stack(
+        (
+            np.full(9, -1.5),
+            np.full(9, -1.9),
+            np.linspace(-4.0, -1.6, 9),
+        )
+    ))
+    np.testing.assert_allclose(table[-9:, 1:], np.column_stack(
+        (
+            np.full(9, 1.5),
+            np.full(9, 4.0),
+            np.linspace(-4.0, -1.6, 9),
+        )
+    ))
 
 
 def test_partitions_are_complete_and_disjoint():
@@ -27,3 +49,31 @@ def test_radial_default_preserves_node_count_and_outer_coverage():
     assert nodes[-1] == pytest.approx(2.5)
     assert np.all(np.diff(nodes) > 0.0)
 
+
+def test_search_config_rejects_base_quadratic_nyquist_boundary():
+    with pytest.raises(ValueError) as error:
+        SearchConfig(base_n_alpha=128)
+
+    message = str(error.value)
+    assert "base_n_alpha=128" in message
+    assert "mode 64 is exactly the real-FFT Nyquist bin" in message
+    assert "base_n_alpha >= 130" in message
+    assert "256 is a radix-2 choice" in message
+
+
+def test_search_config_rejects_full_quadratic_nyquist_boundary():
+    with pytest.raises(ValueError) as error:
+        SearchConfig(full_n_alpha=512)
+
+    message = str(error.value)
+    assert "full_n_alpha=512" in message
+    assert "mode 256 is exactly the real-FFT Nyquist bin" in message
+    assert "full_n_alpha >= 514" in message
+    assert "1024 is a radix-2 choice" in message
+
+
+def test_search_config_accepts_minimum_safe_even_grids():
+    config = SearchConfig(base_n_alpha=130, full_n_alpha=520)
+
+    assert config.base_n_alpha == 130
+    assert config.full_n_alpha == 520

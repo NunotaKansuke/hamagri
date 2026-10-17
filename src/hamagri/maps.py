@@ -12,7 +12,7 @@ from ._core.bucketed_atlas import BucketedPolarAtlas
 from ._core.radial import interpolate_coefficients
 
 
-class Maps:
+class Atlas:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path).resolve()
         manifest = json.loads((self.path / "manifest.json").read_text())
@@ -20,19 +20,54 @@ class Maps:
         self._core = (
             BucketedPolarAtlas(self.path) if self._bucketed else PolarAtlas(self.path)
         )
+        self.coordinate_frame = self._read_coordinate_frame(manifest)
+
+    def _read_coordinate_frame(self, manifest: dict) -> str | None:
+        """Read explicit frame metadata or the legacy atlas angle convention."""
+        declared = manifest.get("coordinate_frame")
+        if declared is not None and declared not in {"map", "native"}:
+            raise ValueError(
+                "atlas coordinate_frame must be either 'map' or 'native'"
+            )
+        conventions = {
+            "hammlet-map-frame-radians": "map",
+            "hammlet-native-frame-radians": "native",
+        }
+        if self._bucketed:
+            angle_conventions = {
+                bucket.atlas.manifest.get("angle_convention")
+                for bucket in self._core.buckets
+            }
+            if len(angle_conventions) > 1:
+                raise ValueError(
+                    "bucketed atlas mixes angle conventions; a single search "
+                    "coordinate frame cannot be inferred"
+                )
+            inferred = conventions.get(next(iter(angle_conventions), None))
+        else:
+            inferred = conventions.get(manifest.get("angle_convention"))
+        if declared is not None and inferred is not None and declared != inferred:
+            raise ValueError(
+                "atlas coordinate_frame conflicts with its angle_convention"
+            )
+        return declared or inferred
 
     @classmethod
-    def open(cls, path: str | Path) -> "Maps":
+    def open(cls, path: str | Path) -> "Atlas":
         return cls(path)
 
     @property
     def parameters(self) -> np.ndarray:
-        """Rows ``(log10(s), log10(q), log10(rho))`` in stable map-ID order."""
+        """Rows ``(log10(s), log10(q), log10(rho))`` aligned with ``map_ids``."""
         return np.asarray(self._core.map_parameters)
 
     @property
     def map_ids(self) -> np.ndarray:
         return np.asarray(self._core.map_ids)
+
+    @property
+    def n_maps(self) -> int:
+        return int(self.map_ids.size)
 
     @property
     def radial_nodes(self) -> np.ndarray:
@@ -88,3 +123,7 @@ class Maps:
         from .search import search
 
         return search(self, datasets, geometries, config=config)
+
+
+# ``Atlas`` is the release-facing name; ``Maps`` remains as a compatibility alias.
+Maps = Atlas

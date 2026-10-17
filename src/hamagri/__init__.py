@@ -1,12 +1,13 @@
-"""Hammlet: fast binary-microlensing map building and seed searches."""
+"""hamagri: fast binary-microlensing map building and seed searches."""
 
 from .build import build_maps, merge_maps
 from .config import MapConfig, ParameterGrid, Partition, SearchConfig
-from .maps import Maps
+from .maps import Atlas, Maps
 from .search import Candidate, Dataset, Geometry, SearchResult, search
 
 __all__ = [
     "MapConfig",
+    "Atlas",
     "Maps",
     "Candidate",
     "Dataset",
