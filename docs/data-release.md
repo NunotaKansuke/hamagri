@@ -11,10 +11,9 @@ software repository must not contain copies of the coefficient arrays.
 
 The intended source is the curated, integrated version-1 atlas, with root
 `manifest.json` and a `buckets/` directory. The latest inspection recorded
-33,993 maps, 161 buckets, and `m_max=512`. The root format identifier is `hammlet-bucketed-fourier-maps`;
-child manifests use `hammlet-fourier-maps`. Those historical strings are kept
-as version-1 on-disk format identifiers so the data does not need a 72 GB
-rewrite to adopt the `hamagri` name.
+33,993 maps, 161 buckets, and `m_max=512`. Root manifests use
+`hamagri-bucketed-fourier-maps`; child manifests use `hamagri-fourier-maps`.
+The public code and distributed atlas use the same `hamagri` manifest schema.
 
 The atlas stores Fourier coefficients, reconstruction-error metadata, and
 radial-layout metadata. It does not need chi-square certificate files. The
@@ -25,13 +24,20 @@ and risk diagnostics, without certified chi-square bounds.
 ## Verified package and Zenodo constraints
 
 The staging package was prepared from the designated integrated version-1
-atlas on 2026-10-17. The file inventory contains 206,093 paths totaling
-71,562,006,294 bytes; its SHA-256 is
-`32825ee97763381b582d22790d2d7a8e92e3a017e018ff9e151567e83ce58a64`.
+atlas on 2026-10-17. The original file inventory contains 206,093 paths
+totaling 71,562,006,294 bytes. The public staging copy uses the `hamagri-*`
+manifest identifiers expected by the software. Its updated `SHA256SUMS.tsv`
+has SHA-256
+`68268c29b1fccbcecb36850572369dd249e507155efc5ecaf79946a85e5de3f8`.
 Four uncompressed tar archives preserve the root `manifest.json` and the
 relative `buckets/` layout. All 206,093 archived files were streamed through a
 size and SHA-256 comparison against the inventory; every archive checksum also
 matched. No paths were missing, duplicated, unexpected, or non-regular.
+
+For the public staging copy, 162 JSON manifests were updated in place with
+equal-length identifier replacements. The coefficient arrays were not
+rewritten. The inventory rows for those manifests and all four archive
+checksums were regenerated; the other 205,931 archived files are unchanged.
 
 The archive sizes are 21,111,152,640; 21,584,322,560; 21,623,050,240; and
 7,678,863,360 bytes (71,997,388,800 bytes total). The upload package has four
@@ -47,8 +53,8 @@ restored copy was removed after the check.
 Zenodo currently documents a default per-record total of 50,000,000,000 bytes,
 up to 100 uploaded files, and up to 50GB per file. Its quota page documents up
 to 150GB of additional storage that can be assigned across records, up to
-200GB total for a record. The nine-file package totals 72,023,939,384 bytes,
-so it needs at least 22,023,939,384 bytes of additional quota. The actual
+200GB total for a record. The nine-file package totals 72,023,939,465 bytes,
+so it needs at least 22,023,939,465 bytes of additional quota. The actual
 available quota is account-specific and must be checked in the account's
 storage settings before upload. See [Zenodo file limits](https://help.zenodo.org/docs/deposit/manage-files/)
 and [Zenodo storage quota](https://help.zenodo.org/docs/deposit/manage-quota/).

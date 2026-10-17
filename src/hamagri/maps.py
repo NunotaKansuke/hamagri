@@ -16,7 +16,7 @@ class Atlas:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path).resolve()
         manifest = json.loads((self.path / "manifest.json").read_text())
-        self._bucketed = manifest.get("format") == "hammlet-bucketed-fourier-maps"
+        self._bucketed = manifest.get("format") == "hamagri-bucketed-fourier-maps"
         self._core = (
             BucketedPolarAtlas(self.path) if self._bucketed else PolarAtlas(self.path)
         )
@@ -30,8 +30,8 @@ class Atlas:
                 "atlas coordinate_frame must be either 'map' or 'native'"
             )
         conventions = {
-            "hammlet-map-frame-radians": "map",
-            "hammlet-native-frame-radians": "native",
+            "hamagri-map-frame-radians": "map",
+            "hamagri-native-frame-radians": "native",
         }
         if self._bucketed:
             angle_conventions = {

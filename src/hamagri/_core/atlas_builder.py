@@ -33,7 +33,7 @@ class PolarAtlasBuilder:
         core_m_max: int | None = None,
         shard_size: int = 256,
         coefficient_dtype: str = "complex64",
-        angle_convention: str = "hammlet-map-frame-radians",
+        angle_convention: str = "hamagri-map-frame-radians",
     ) -> None:
         nodes = np.asarray(radial_nodes, dtype=np.float64)
         if nodes.ndim != 1 or nodes.size < 2 or np.any(np.diff(nodes) <= 0):
@@ -279,7 +279,7 @@ class PolarAtlasBuilder:
         np.save(output / "map_ids.npy", np.asarray(all_map_ids, dtype=np.int64))
         np.save(output / "map_parameters.npy", np.asarray(all_parameters, dtype=np.float64))
         manifest = {
-            "format": "hammlet-fourier-maps",
+            "format": "hamagri-fourier-maps",
             "version": 1,
             "n_maps": len(all_map_ids),
             "n_r": self.radial_nodes.size,
