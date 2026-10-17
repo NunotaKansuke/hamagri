@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "hamagri"
+authors:
+  - family-names: "Nunota"
+    given-names: "Kansuke"
+    orcid: "https://orcid.org/0009-0005-3414-455X"
+version: "0.1.0"
+license: "MIT"

@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass
 import json
 from numbers import Integral
 from pathlib import Path
-from typing import Protocol, Sequence
+from typing import Literal, Protocol, Sequence
 
 import numpy as np
 
@@ -61,8 +61,14 @@ class DirectSpectrumConfig:
     caustic_points_per_side: int = 4
     diagnostic_m_max: int = 768
     radial_certificate_levels: int = 1
+    build_radial_certificate: bool = False
+    store_certificate_arrays: bool = True
 
     def __post_init__(self) -> None:
+        if not isinstance(self.build_radial_certificate, bool):
+            raise ValueError("build_radial_certificate must be a boolean")
+        if not isinstance(self.store_certificate_arrays, bool):
+            raise ValueError("store_certificate_arrays must be a boolean")
         for name in ("m_max", "core_m_max", "diagnostic_m_max"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, Integral):
@@ -512,6 +518,7 @@ class VBMBinaryLensEvaluator:
         *,
         tolerance: float = 1.0e-3,
         relative_tolerance: float = 1.0e-4,
+        coordinate_frame: Literal["map", "native"] = "map",
     ) -> None:
         try:
             import VBMicrolensing
@@ -528,10 +535,17 @@ class VBMBinaryLensEvaluator:
         ):
             if not np.isfinite(value) or value <= 0.0:
                 raise ValueError(f"{name} must be finite and positive")
+        if coordinate_frame not in ("map", "native"):
+            raise ValueError("coordinate_frame must be 'map' or 'native'")
         self.separation = float(separation)
         self.mass_ratio = float(mass_ratio)
         self.source_radius = float(source_radius)
-        self._shift_x = adamgrid_map_origin_shift(separation, mass_ratio)
+        self.coordinate_frame = coordinate_frame
+        self._shift_x = (
+            adamgrid_map_origin_shift(separation, mass_ratio)
+            if coordinate_frame == "map"
+            else 0.0
+        )
         self._vbm = VBMicrolensing.VBMicrolensing()
         self._vbm.Tol = float(tolerance)
         self._vbm.RelTol = float(relative_tolerance)
@@ -546,10 +560,14 @@ class VBMBinaryLensEvaluator:
             if not np.allclose(array[0], array[-1]):
                 array = np.vstack((array, array[0]))
             native_components.append(array)
-        self.caustic_components = caustics_to_adamgrid_map_frame(
-            native_components,
-            separation=self.separation,
-            mass_ratio=self.mass_ratio,
+        self.caustic_components = (
+            caustics_to_adamgrid_map_frame(
+                native_components,
+                separation=self.separation,
+                mass_ratio=self.mass_ratio,
+            )
+            if coordinate_frame == "map"
+            else tuple(native_components)
         )
 
     def magnification(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -584,7 +602,10 @@ class DirectVBMPolarAtlasBuilder(PolarAtlasBuilder):
         spectrum_config: DirectSpectrumConfig,
         shard_size: int = 256,
         coefficient_dtype: str = "complex64",
+        coordinate_frame: str = "map",
     ) -> None:
+        if coordinate_frame not in {"map", "native"}:
+            raise ValueError("coordinate_frame must be 'map' or 'native'")
         super().__init__(
             radial_nodes,
             n_phi_build=spectrum_config.max_n_phi,
@@ -592,7 +613,9 @@ class DirectVBMPolarAtlasBuilder(PolarAtlasBuilder):
             core_m_max=spectrum_config.core_m_max,
             shard_size=shard_size,
             coefficient_dtype=coefficient_dtype,
+            angle_convention=f"hammlet-{coordinate_frame}-frame-radians",
         )
+        self.coordinate_frame = coordinate_frame
         self.spectrum_config = spectrum_config
         self._map_diagnostics: list[dict[str, object]] = []
 
@@ -643,6 +666,75 @@ class DirectVBMPolarAtlasBuilder(PolarAtlasBuilder):
         ]
         exact_x = np.stack([item.x_coeff for item in rings])
         stored_x = exact_x.astype(self.coefficient_dtype)
+        if not self.spectrum_config.build_radial_certificate:
+            self._map_diagnostics.append(
+                {
+                    "evaluations": np.asarray(
+                        [item.evaluations for item in rings], dtype=np.int32
+                    ),
+                    "uniform_n_phi": np.asarray(
+                        [item.uniform_n_phi for item in rings], dtype=np.int32
+                    ),
+                    "caustic_guarded": np.asarray(
+                        [item.caustic_guarded for item in rings], dtype=bool
+                    ),
+                    "local_refined": np.asarray(
+                        [item.local_refined for item in rings], dtype=bool
+                    ),
+                    "converged": np.asarray(
+                        [item.converged for item in rings], dtype=bool
+                    ),
+                    "coefficient_error": np.asarray(
+                        [item.coefficient_error for item in rings], dtype=np.float64
+                    ),
+                    "normalized_coefficient_error": np.asarray(
+                        [item.normalized_coefficient_error for item in rings],
+                        dtype=np.float64,
+                    ),
+                    "x_normalized_coefficient_error": np.asarray(
+                        [item.x_normalized_coefficient_error for item in rings],
+                        dtype=np.float64,
+                    ),
+                    "x2_normalized_coefficient_error": np.asarray(
+                        [item.x2_normalized_coefficient_error for item in rings],
+                        dtype=np.float64,
+                    ),
+                    "certificate_unresolved_error": np.asarray(
+                        [item.certificate_unresolved_error for item in rings],
+                        dtype=np.float64,
+                    ),
+                    "angular_certified_error": np.asarray(
+                        [item.certified_error for item in rings], dtype=np.float64
+                    ),
+                    "angular_certified_error_core": np.asarray(
+                        [item.certified_error_core for item in rings],
+                        dtype=np.float64,
+                    ),
+                    "radial_holdout_evaluations": np.asarray(0, dtype=np.int64),
+                }
+            )
+            return {
+                "x_coeff": stored_x,
+                "x2_coeff": np.stack([item.x2_coeff for item in rings]).astype(
+                    self.coefficient_dtype
+                ),
+                "reconstruction_error": np.asarray(
+                    [item.reconstruction_error for item in rings], dtype=np.float32
+                ),
+                "reconstruction_error_core": np.asarray(
+                    [item.reconstruction_error_core for item in rings],
+                    dtype=np.float32,
+                ),
+                "certified_error": np.asarray(
+                    [item.certified_error for item in rings], dtype=np.float32
+                ),
+                "certified_error_core": np.asarray(
+                    [item.certified_error_core for item in rings], dtype=np.float32
+                ),
+                "deviation_envelope": np.asarray(
+                    [item.deviation_envelope for item in rings], dtype=np.float32
+                ),
+            }
         holdout_radii = self._radial_holdout_radii()
         holdout_width = np.repeat(
             np.diff(self.radial_nodes)
@@ -760,6 +852,18 @@ class DirectVBMPolarAtlasBuilder(PolarAtlasBuilder):
         output = super().build(*args, **kwargs)
         manifest_path = output / "manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not self.spectrum_config.store_certificate_arrays:
+            for shard in output.glob("shard_*"):
+                for certificate in shard.glob("certified_error*.npy"):
+                    certificate.unlink()
+            self._map_diagnostics = [
+                {
+                    name: value
+                    for name, value in item.items()
+                    if "certificate" not in name and "certified_error" not in name
+                }
+                for item in self._map_diagnostics
+            ]
         diagnostics = {
             name: np.stack([np.asarray(item[name]) for item in self._map_diagnostics])
             for name in self._map_diagnostics[0]
@@ -767,14 +871,22 @@ class DirectVBMPolarAtlasBuilder(PolarAtlasBuilder):
         np.savez_compressed(output / "direct_diagnostics.npz", **diagnostics)
         manifest["builder"] = "direct-vbm-adaptive-radial-fourier"
         manifest["error_certificate"] = (
-            "piecewise-linear-vbm-angular-and-radial-reference"
+            "none"
+            if not self.spectrum_config.store_certificate_arrays
+            else (
+                "piecewise-linear-vbm-angular-and-radial-reference"
+                if self.spectrum_config.build_radial_certificate
+                else "adaptive-vbm-angular-reference-only"
+            )
         )
+        if not self.spectrum_config.store_certificate_arrays:
+            manifest["has_certificates"] = False
         manifest["direct_spectrum_config"] = asdict(self.spectrum_config)
         stored_evaluations = int(np.sum(diagnostics["evaluations"]))
         holdout_evaluations = int(
             np.sum(diagnostics["radial_holdout_evaluations"])
         )
-        manifest["direct_diagnostics"] = {
+        direct_diagnostics = {
             "total_vbm_evaluations": stored_evaluations + holdout_evaluations,
             "stored_ring_vbm_evaluations": stored_evaluations,
             "unconverged_rings": int(np.sum(~diagnostics["converged"])),
@@ -783,11 +895,18 @@ class DirectVBMPolarAtlasBuilder(PolarAtlasBuilder):
                 np.max(diagnostics["normalized_coefficient_error"])
             ),
             "radial_holdout_evaluations": holdout_evaluations,
-            "max_radial_certificate": float(
-                np.max(diagnostics["radial_certificate"])
-            ),
             "per_ring_diagnostics": "direct_diagnostics.npz",
         }
+        if self.spectrum_config.store_certificate_arrays:
+            if self.spectrum_config.build_radial_certificate:
+                direct_diagnostics["max_radial_certificate"] = float(
+                    np.max(diagnostics["radial_certificate"])
+                )
+            else:
+                direct_diagnostics["max_angular_certificate"] = float(
+                    np.max(diagnostics["angular_certified_error"])
+                )
+        manifest["direct_diagnostics"] = direct_diagnostics
         manifest_path.write_text(
             json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
         )

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from hammlet._core.multires import MultiResolutionScanResult
+from hamagri._core.multires import MultiResolutionScanResult
 
 
 def test_multires_candidates_are_ranked_and_ready_for_direct_handoff() -> None:

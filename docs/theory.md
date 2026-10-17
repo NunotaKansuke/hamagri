@@ -16,7 +16,7 @@ $$
 X(r,\phi)=A(r\cos\phi,r\sin\phi)-1.
 $$
 
-Hammlet stores angular Fourier coefficients at fixed radial nodes $r_j$:
+hamagri stores angular Fourier coefficients at fixed radial nodes $r_j$:
 
 $$
 c_m(r_j)=\frac{1}{2\pi}\int_0^{2\pi}
@@ -44,7 +44,7 @@ by an inverse FFT.
 ## 2. Direct adaptive coefficient construction
 
 No intermediate Cartesian magnification map is required. For each ring,
-Hammlet starts from a uniform power-of-two angular grid. It computes the VBM
+hamagri starts from a uniform power-of-two angular grid. It computes the VBM
 values, applies an `rfft`, doubles the grid, and compares the common retained
 modes. A ring is globally converged when the series norm of the coefficient
 change satisfies the configured absolute and relative tolerances.
@@ -76,7 +76,7 @@ intervals coexist.
 ## 3. Why outer polar rings are not undersampled
 
 A fixed number of angles gives arc length $r\,\Delta\phi$, which grows with
-radius. Hammlet addresses this in two complementary places:
+radius. hamagri addresses this in two complementary places:
 
 1. Each `(s,q)` bucket evaluates sharp-rho pilot maps on a dense quadratic
    radial pilot grid. Leave-one-radius-out spectral interpolation error defines
@@ -86,16 +86,13 @@ radius. Hammlet addresses this in two complementary places:
 2. Angular sampling is driven by retained-coefficient convergence and caustic
    proximity, not by a single fixed $N_\phi$. A caustic-guarded outer ring can
    therefore use the same fine angular work limit as an inner ring.
-3. Every final radial interval receives nested direct-evaluator holdout rings.
-   Their spectra define a denser piecewise-linear radial reference. A
-   polynomial remainder bound certifies both the linear and cubic runtime
-   interpolants against that reference and folds the result into the stored
-   node-error envelope.
+3. The public build stores per-ring reconstruction diagnostics. It does not
+   run the optional extra radial-holdout stage or write chi-square certificate
+   arrays; neither is part of the curated atlas.
 
-The per-ring generation cost remains bounded by `max_n_phi`. Radial holdouts
-increase one-time generation work but add no search-time contraction. This is
-an accuracy/work policy, not a proof that every continuous radial feature
-between unevaluated holdout rings is resolved. See
+The per-ring generation cost remains bounded by `max_n_phi`. Adaptive sampling
+and the stored reconstruction diagnostics target map quality; they are not a
+formal guarantee for every continuous radial feature. See
 [accuracy.md](accuracy.md).
 
 ## 4. Trajectory contraction
@@ -138,7 +135,7 @@ $$
 F_i=F_{s,d}A_i+F_{b,d}.
 $$
 
-At every $(\mathrm{map},\mathrm{geometry},\alpha)$, Hammlet profiles the two linear fluxes
+At every $(\mathrm{map},\mathrm{geometry},\alpha)$, hamagri profiles the two linear fluxes
 exactly. Let $w_i=\sigma_i^{-2}$ and
 
 $$
@@ -171,27 +168,19 @@ geometry batch shares the same map coefficients.
 ## 6. Multi-resolution selection
 
 The base pass uses $(M_b,N_{\alpha,b})$, scans every map, and records the central
-chi-square plus an uncertainty interval. The full pass uses
+chi-square plus reconstruction-risk diagnostics. The full pass uses
 $\left(M_f,N_{\alpha,f}\right)$ only on a union of:
 
 - the best base chi-square maps;
 - the largest spectral-risk maps;
-- every interval that can overlap the current top-K upper cutoff when
-  `certified_selection=True`.
 
-If $U_{(K)}$ is the $K$-th smallest upper bound, interval-safe selection retains
-every candidate $i$ for which
-
-$$
-L_i\le U_{(K)}.
-$$
-
-This prevents a hard central-chi-square cutoff from discarding a candidate that
-can still enter the true top K under the supplied error envelope.
+The curated atlas does not contain chi-square certificate arrays. The public
+API therefore uses central-score and risk-based screening only and does not
+claim that a retained set is a guaranteed top-K enclosure.
 
 ## 7. High-mode seed refinement
 
-After interval-safe selection and clustering, the normal handoff objective uses
+After screening and clustering, the normal handoff objective uses
 all stored modes (normally $M=512$) and cubic radial interpolation. For parameter vector
 
 $$

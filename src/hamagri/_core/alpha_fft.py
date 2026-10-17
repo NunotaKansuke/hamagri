@@ -4,6 +4,7 @@ from typing import Sequence
 
 import numpy as np
 
+from .nyquist import validate_quadratic_alpha_grid, validate_real_fft_grid
 from .trajectory import ConsistentEventKernel, EventKernel
 
 
@@ -23,8 +24,12 @@ def _batched_radial_contraction(
 
 def fourier_series_values(coefficients: np.ndarray, n_alpha: int) -> np.ndarray:
     """Evaluate positive-frequency Fourier-series coefficients on a uniform grid."""
-    if coefficients.shape[-1] - 1 > n_alpha // 2:
-        raise ValueError("coefficient array contains modes beyond the output Nyquist limit")
+    validate_real_fft_grid(
+        n_alpha,
+        coefficients.shape[-1] - 1,
+        parameter="n_alpha",
+        quantity="Fourier coefficient array",
+    )
     spectrum = np.zeros(
         coefficients.shape[:-1] + (n_alpha // 2 + 1,), dtype=np.complex128
     )
@@ -149,8 +154,7 @@ def scan_coefficients_consistent(
     if x_coeff.ndim != 3:
         raise ValueError("x_coeff must have shape (map, radius, mode)")
     m_max = x_coeff.shape[-1] - 1
-    if n_alpha // 2 < 2 * m_max:
-        raise ValueError("n_alpha must be at least 4*m_max")
+    validate_quadratic_alpha_grid(n_alpha, m_max, parameter="n_alpha")
     kernels = list(kernels)
     if not kernels:
         raise ValueError("at least one event kernel is required")

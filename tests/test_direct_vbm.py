@@ -2,18 +2,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import sys
+from types import SimpleNamespace
 
 import numpy as np
 
-from hammlet import Dataset, Geometry, Maps, SearchConfig
-from hammlet._core.atlas import PolarAtlas
-from hammlet._core.atlas_builder import MapBuildSpec
-from hammlet._core.direct_vbm import (
+from hamagri import Dataset, Geometry, Maps, SearchConfig
+from hamagri._core.atlas import PolarAtlas
+from hamagri._core.atlas_builder import MapBuildSpec
+from hamagri._core.caustics import (
+    map_frame_pspl_parameters,
+    native_pspl_parameters_from_map,
+)
+from hamagri._core.direct_vbm import (
     DirectSpectrumConfig,
     DirectVBMPolarAtlasBuilder,
+    VBMBinaryLensEvaluator,
     adaptive_ring_spectrum,
 )
-from hammlet._core.reference import direct_alpha_scan
+from hamagri._core.map_adapter import trajectory_xy
 
 
 @dataclass
@@ -81,6 +88,61 @@ def _config(**updates) -> DirectSpectrumConfig:
     return DirectSpectrumConfig(**values)
 
 
+def test_vbm_coordinate_frames_are_physically_equivalent(monkeypatch) -> None:
+    class FakeVbm:
+        def __init__(self):
+            self.Tol = None
+            self.RelTol = None
+            self.a1 = None
+
+        def Caustics(self, separation, mass_ratio):
+            return [np.asarray([[0.1, 0.0], [0.1, 0.2], [0.1, 0.0]])]
+
+        def BinaryMag2(self, separation, mass_ratio, x, y, source_radius):
+            return 2.0 + x + 3.0 * y
+
+    monkeypatch.setitem(
+        sys.modules,
+        "VBMicrolensing",
+        SimpleNamespace(VBMicrolensing=FakeVbm),
+    )
+    separation = 2.0
+    mass_ratio = 0.5
+    shift = -(separation - 1.0 / separation) * mass_ratio / (1.0 + mass_ratio)
+    x = np.asarray([-0.4, 0.0, 0.8])
+    y = np.asarray([0.2, -0.3, 0.5])
+    native = VBMBinaryLensEvaluator(
+        separation, mass_ratio, 0.01, coordinate_frame="native"
+    )
+    map_frame = VBMBinaryLensEvaluator(
+        separation, mass_ratio, 0.01, coordinate_frame="map"
+    )
+
+    np.testing.assert_allclose(
+        native.magnification(x, y), map_frame.magnification(x - shift, y)
+    )
+    np.testing.assert_allclose(
+        native.caustic_components[0][:, 0] - shift,
+        map_frame.caustic_components[0][:, 0],
+    )
+
+
+def test_map_frame_pspl_translation_matches_pointwise_trajectory() -> None:
+    time = np.linspace(-3.0, 4.0, 31)
+    t0, u0, tE, s, q, alpha = 2.3, 0.17, 4.2, 2.0, 0.5, 1.1
+    t0_map, u0_map = map_frame_pspl_parameters(t0, u0, tE, s, q, alpha)
+    native_x, native_y = trajectory_xy(time, t0, u0, tE, alpha)
+    map_x, map_y = trajectory_xy(time, t0_map, u0_map, tE, alpha)
+    shift = -(s - 1.0 / s) * q / (1.0 + q)
+
+    np.testing.assert_allclose(map_x, native_x - shift)
+    np.testing.assert_allclose(map_y, native_y)
+    np.testing.assert_allclose(
+        native_pspl_parameters_from_map(t0_map, u0_map, tE, s, q, alpha),
+        (t0, u0),
+    )
+
+
 def test_nested_fft_recovers_smooth_low_modes() -> None:
     result = adaptive_ring_spectrum(SmoothRing(), 1.0, _config())
 
@@ -125,7 +187,12 @@ def test_caustic_local_refinement_recovers_narrow_feature() -> None:
 
 
 def test_direct_builder_writes_compatible_atlas_and_provenance(tmp_path) -> None:
-    config = _config(m_max=4, core_m_max=2, diagnostic_m_max=8)
+    config = _config(
+        m_max=4,
+        core_m_max=2,
+        diagnostic_m_max=8,
+        build_radial_certificate=True,
+    )
     builder = DirectVBMPolarAtlasBuilder(
         np.asarray([0.1, 0.5, 1.0]),
         spectrum_config=config,
@@ -154,9 +221,40 @@ def test_direct_builder_writes_compatible_atlas_and_provenance(tmp_path) -> None
     assert np.all(shard.certified_error >= shard.reconstruction_error)
 
 
-def test_radial_certificate_reaches_profiled_chi2_interval(tmp_path) -> None:
+def test_direct_builder_can_skip_radial_certificate(tmp_path) -> None:
+    config = _config(
+        m_max=4,
+        core_m_max=2,
+        diagnostic_m_max=8,
+        build_radial_certificate=False,
+    )
+    output = DirectVBMPolarAtlasBuilder(
+        np.asarray([0.1, 0.5, 1.0]),
+        spectrum_config=config,
+        shard_size=1,
+    ).build(
+        tmp_path / "angular-only",
+        [MapBuildSpec(3, 0.0, -3.0, -2.0, SmoothRing())],
+    )
+    atlas = PolarAtlas(output)
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+
+    assert manifest["error_certificate"] == "adaptive-vbm-angular-reference-only"
+    assert manifest["direct_diagnostics"]["radial_holdout_evaluations"] == 0
+    with np.load(output / "direct_diagnostics.npz") as diagnostics:
+        assert diagnostics["radial_holdout_evaluations"] == 0
+    shard = next(atlas.iter_shards(m_max=4))
+    assert shard.certified_error is not None
+
+
+def test_public_search_returns_score_without_chi2_bounds(tmp_path) -> None:
     evaluator = RadialRing()
-    config = _config(m_max=4, core_m_max=2, diagnostic_m_max=8)
+    config = _config(
+        m_max=4,
+        core_m_max=2,
+        diagnostic_m_max=8,
+        build_radial_certificate=True,
+    )
     nodes = np.asarray([0.02, 0.16, 0.38, 0.7, 1.05, 1.4])
     output = DirectVBMPolarAtlasBuilder(
         nodes, spectrum_config=config, shard_size=1
@@ -164,7 +262,7 @@ def test_radial_certificate_reaches_profiled_chi2_interval(tmp_path) -> None:
         tmp_path / "radial-maps",
         [MapBuildSpec(0, 0.0, -3.0, -2.0, evaluator)],
     )
-    geometry = Geometry(t0=0.0, u0=0.12, tE=1.0)
+    geometry = Geometry(t0=0.0, u0=0.12, tE=1.0, coordinate_frame="map")
     time = np.linspace(-1.2, 1.2, 81)
     alpha = 0.43
     tau = time
@@ -172,7 +270,7 @@ def test_radial_certificate_reaches_profiled_chi2_interval(tmp_path) -> None:
     y = -geometry.u0 * np.cos(alpha) - tau * np.sin(alpha)
     flux = 2.1 * evaluator.magnification(x, y) + 0.35
     dataset = Dataset(time, flux, np.full_like(time, 0.01))
-    n_alpha = 16
+    n_alpha = 24
     result = Maps.open(output).search(
         [dataset],
         [geometry],
@@ -187,12 +285,8 @@ def test_radial_certificate_reaches_profiled_chi2_interval(tmp_path) -> None:
             refine=False,
         ),
     )
-    direct = direct_alpha_scan(
-        evaluator,
-        [dataset],
-        geometry,
-        2.0 * np.pi * np.arange(n_alpha) / n_alpha,
-    )
     candidate = result.candidates[0]
 
-    assert candidate.chi2_lower <= np.min(direct) <= candidate.chi2_upper
+    assert np.isfinite(candidate.chi2)
+    assert not hasattr(candidate, "chi2_lower")
+    assert not hasattr(candidate, "chi2_upper")

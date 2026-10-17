@@ -1,84 +1,105 @@
 # Python API
 
-## ParameterGrid
+## Open an atlas
 
-`ParameterGrid(s=..., q=..., rho=...)` takes physical positive values.
-`ParameterGrid.from_log10(log_s=..., log_q=..., log_rho=...)` is the logarithmic
-equivalent. Axes must be strictly increasing; the stable map ID order is
-`s -> q -> rho`.
+```python
+from hamagri import Atlas
 
-## MapConfig
+atlas = Atlas.open('hamagri-atlas')
+print(atlas.n_maps, atlas.m_max, atlas.coordinate_frame)
+```
 
-Important defaults:
+`Atlas.open()` reads the bucketed version-1 manifest distributed with the
+curated atlas, as well as the single-atlas version-1 format. Array files are
+memory-mapped. `Maps` remains as a compatibility alias; new code should use
+`Atlas`.
 
-| field | default | meaning |
+`atlas.map_ids` and rows of `atlas.parameters` are aligned. For a bucketed
+atlas, their order follows the bucket entries in the root manifest; it is not
+necessarily ascending by numeric map ID.
+
+The version-1 manifests identify their format with historical `hammlet-*`
+strings. These are on-disk format identifiers and are retained so the released
+atlas can be read without rewriting 72 GB of data.
+
+## Reconstruct magnification
+
+```python
+A = atlas.magnification(map_id, x, y, m_max=96)
+```
+
+Coordinates are Cartesian in the atlas coordinate frame and must lie within its
+stored radial range. For bucketed atlases, use `atlas.radial_nodes_for(map_id)`
+to inspect the radial grid for a map.
+
+## Search light curves
+
+```python
+import numpy as np
+from hamagri import Dataset, Geometry, SearchConfig
+
+samples = np.loadtxt('lightcurve.dat')
+dataset = Dataset(samples[:, 0], samples[:, 1], samples[:, 2])
+geometry = Geometry(
+    t0=2459000.0,
+    u0=0.08,
+    tE=24.0,
+    coordinate_frame=atlas.coordinate_frame,
+)
+result = atlas.search([dataset], [geometry], config=SearchConfig())
+best = result.candidates[0]
+```
+
+`Geometry.coordinate_frame` defaults to `"native"`. It must match
+`atlas.coordinate_frame`; this release raises an error on a mismatch. The
+curated atlas is in the AdaMGrid map frame. Conversion from native geometry is
+map-specific and varies with `(s, q, alpha)`, so the shared-geometry FFT path
+does not apply that conversion automatically.
+
+### SearchConfig
+
+| Field | Default | Meaning |
 |---|---:|---|
-| `m_max` | 512 | maximum stored angular mode |
-| `core_m_max` | 128 | modes in the small core coefficient file |
-| `radial_nodes` | 256 | samples shared inside each `(s,q)` bucket |
-| `radial_max` | 3.5 | largest map-frame radius |
-| `min_n_phi` | 512 | initial smooth-ring samples |
-| `caustic_base_n_phi` | 2048 | initial guarded-ring samples |
-| `max_n_phi` | 8192 | maximum uniform angular work |
-| `diagnostic_m_max` | 1024 | modes used for tail/error diagnosis |
-| `radial_s_buckets` | 4 | number of radial-layout groups across s |
-| `radial_q_buckets` | 4 | number of radial-layout groups across q |
-| `radial_pilot_maps` | 8 | sharp-rho pilot maps per bucket |
-| `radial_adaptive_fraction` | 0.65 | radial nodes allocated by measured difficulty |
-| `radial_certificate_levels` | 1 | dyadic direct-VBM holdout level inside every radial interval |
+| `base_m_max` | 32 | mode limit for the all-map ranking pass |
+| `full_m_max` | 128 | mode limit for the selected-map pass |
+| `base_n_alpha` | 144 | alpha samples in the ranking pass |
+| `full_n_alpha` | 576 | alpha samples in the selected-map pass |
+| `top_count` | 500 | low-chi-square maps considered for rescanning |
+| `risk_count` | 500 | high spectral-risk maps considered for rescanning |
+| `candidate_count` | 300 | maximum downstream candidate seeds |
+| `full_radial_order` | 3 | cubic interpolation order in the selected-map pass |
+| `refine` | true | refine candidate seeds in coefficient space |
 
-The power-of-two angular limits are validated by the numerical core.
-Level 1 adds each interval midpoint, approximately doubling ring generation.
-Levels 2 and 3 add all dyadic quarter or eighth points for stricter sampled
-references at correspondingly higher one-time generation cost. These levels do
-not add search-time arrays or contractions.
+For every stage, `n_alpha` must be even and satisfy `n_alpha >= 4*m_max + 2`.
+The quadratic light-curve moment reaches mode `2*m_max`; putting that mode on
+the real-FFT Nyquist bin is unsafe. A `ValueError` reports the parameter,
+unsafe value, reason, minimum safe grid, and a radix-2 suggestion.
 
-## build_maps
+For example, `base_m_max=32` with `base_n_alpha=128` puts mode 64 exactly on
+the Nyquist bin. `SearchConfig` rejects it before a scan and reports that
+`base_n_alpha` must be at least 130, with 256 as the radix-2 suggestion.
 
-```python
-build_maps(path, grid, config=MapConfig(), partition=Partition())
-```
+The default search ranks every map at `(M, n_alpha) = (32, 144)`, rescans
+selected maps at `(128, 576)`, then refines retained seeds up to the modes
+stored in the atlas. Selection uses central chi-square and reconstruction-risk
+ranking. It does not use or report certified chi-square intervals.
 
-The function requires the optional VBMicrolensing dependency. An existing
-destination is never overwritten. Failed builds remove only their own private
-partial directory.
+A `Candidate` exposes the physical map parameters, profiled `chi2`, FFT score,
+spectral-risk diagnostic, refined trajectory parameters, and whether
+refinement changed the map ID. It has no `chi2_lower` or `chi2_upper` fields.
 
-## Maps
-
-`Maps.open(path)` memory-maps the stored arrays. Useful members are
-`map_ids`, `parameters`, and `m_max`. Radial nodes vary by bucket and are
-available through `radial_nodes_for(map_id)`.
+## Build maps
 
 ```python
-A = maps.magnification(map_id, x, y, m_max=96)
+from hamagri import MapConfig, ParameterGrid, Partition, build_maps
+
+grid = ParameterGrid(s=(0.8, 1.0, 1.2), q=(1e-4, 1e-3), rho=(3e-4, 1e-3))
+build_maps('maps', grid, config=MapConfig(), partition=Partition())
 ```
 
-reconstructs at arbitrary Cartesian points. Coordinates must lie inside the
-stored radial range.
-
-## Dataset and Geometry
-
-`Dataset(time, flux, error, name="")` validates one photometric dataset.
-`Geometry(t0, u0, tE)` specifies a rectilinear trajectory seed; angles are
-radians and `tE` must be positive.
-
-## SearchConfig and Maps.search
-
-```python
-result = maps.search(datasets, geometries, config=SearchConfig())
-```
-
-The default scan uses `M=32, N_alpha=128` with linear radial interpolation for
-global ranking and `M=128, N_alpha=512` with cubic interpolation for selected
-maps. Certified chi-square intervals decide which maps cannot yet be discarded.
-
-Up to 300 independent candidates are then evaluated at `M=512` (or the largest
-mode stored by older/smaller maps). All candidates
-receive two batched pattern-search levels. The best 32 additionally compare up
-to 26 neighbouring maps and receive one pairwise plus ten deep pattern levels.
-Candidate fields include starting/final map IDs, refined `(t0,u0,tE,alpha)`,
-physical `(s,q,rho)`, FFT and refined chi-square, FFT lower/upper bounds, and
-spectral risk.
-
-The first call includes JAX compilation. Benchmark steady-state throughput
-separately from cold-start latency.
+`build_maps` requires the optional VBMicrolensing dependency. Its default
+adaptive angular and radial sampling targets map reconstruction quality. The
+default does not write `certified_error*.npy` arrays, and reconstruction
+diagnostics do not provide a certified chi-square bound. The destination is
+never overwritten; interrupted builds can be resumed from their partial output
+as described in [Distributed generation](distributed-generation.md).

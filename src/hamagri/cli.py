@@ -8,12 +8,15 @@ from pathlib import Path
 
 from .build import build_maps, merge_maps
 from .config import MapConfig, ParameterGrid, Partition
+from ._core.map_queue import MapQueue
 
 
 def _config(path: Path):
     content = json.loads(path.read_text(encoding="utf-8"))
     grid_data = content["grid"]
-    if {"log_s", "log_q", "log_rho"}.issubset(grid_data):
+    if grid_data.get("preset") == "adamgrid-default":
+        grid = ParameterGrid.from_adamgrid_default()
+    elif {"log_s", "log_q", "log_rho"}.issubset(grid_data):
         grid = ParameterGrid.from_log10(**grid_data)
     else:
         grid = ParameterGrid(**grid_data)
@@ -21,7 +24,7 @@ def _config(path: Path):
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="hammlet")
+    parser = argparse.ArgumentParser(prog="hamagri")
     commands = parser.add_subparsers(dest="command", required=True)
     build = commands.add_parser("build-maps", help="build maps or one partition")
     build.add_argument("config", type=Path)
@@ -32,6 +35,9 @@ def _parser() -> argparse.ArgumentParser:
     merge = commands.add_parser("merge-maps", help="merge a complete set of parts")
     merge.add_argument("output", type=Path)
     merge.add_argument("--destination", type=Path)
+    status = commands.add_parser("queue-status", help="inspect a map-level queue")
+    status.add_argument("queue", type=Path)
+    status.add_argument("--stale-after", type=float, default=600.0)
     return parser
 
 
@@ -46,7 +52,15 @@ def main(argv: list[str] | None = None) -> int:
             partition=Partition(args.part_index, args.part_count),
             progress_every=args.progress_every,
         )
-    else:
+    elif args.command == "merge-maps":
         result = merge_maps(args.output, destination=args.destination)
+    else:
+        queue = MapQueue.open(args.queue)
+        print(json.dumps(queue.status(stale_after=args.stale_after).to_dict(), indent=2))
+        return 0
     print(result)
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from hammlet._core.adaptive_grid import (
+from hamagri._core.adaptive_grid import (
     angular_tail_envelope,
     equidistribute_radial_nodes,
     interpolated_trajectory_error,

@@ -1,156 +1,106 @@
-# Hammlet
+# hamagri
 
-Hammlet builds reusable Fourier maps for binary-microlensing magnification
-patterns and searches them rapidly over `(s, q, rho, alpha)`. It computes the
-angular coefficients directly with
-[VBMicrolensing](https://github.com/valboz/VBMicrolensing), without first
-materializing a large Cartesian AdaMGrid map.
+`hamagri` builds and reads Fourier atlases for binary microlensing
+magnification maps, then uses them to produce candidate seeds for a downstream
+physical fit. Its search score is a profiled light-curve chi-square; a returned
+candidate is a seed, not a final scientific fit.
 
-The package is intended to produce accurate **initial seeds** for a downstream
-physical fit. It is not a replacement for the final direct-VBM optimization.
+The software repository and the large map atlas are separate releases. The
+curated atlas is distributed separately because it is about 72 GB. See
+[Data release](docs/data-release.md) for its manifest format and packaging
+status.
 
 ## Install
 
+Requires Python 3.10 or later. From a checkout of the `hamagri` repository,
+install the search dependencies:
+
 ```bash
-git clone https://github.com/NunotaKansuke/hammlet.git
-cd hammlet
-python -m pip install ".[all]"
+python -m pip install '.[search]'
 ```
 
-For generation only, install `.[generate]`; for searching existing maps,
-install `.[search]`.
+Map generation additionally requires VBMicrolensing:
 
-## Build a map in a few lines
-
-```python
-from hammlet import MapConfig, ParameterGrid, build_maps
-
-grid = ParameterGrid(
-    s=(0.8, 1.0, 1.2),
-    q=(1e-4, 3e-4, 1e-3),
-    rho=(3e-4, 1e-3),
-)
-build_maps("maps", grid, config=MapConfig())
+```bash
+python -m pip install '.[generate]'
 ```
 
-`MapConfig()` stores through `M=512`. Maps are grouped into `(s,q)` buckets;
-each bucket uses the complete rho axis to place 256 radial nodes around measured
-spectral difficulty. Angular sampling independently adapts up to 8192 points
-near caustics. Every radial interval also receives direct-evaluator holdout
-rings used by the stored error certificate. Search reads only the modes needed
-by each stage.
-
-The same API accepts logarithmic axes without manual exponentiation:
-
-```python
-grid = ParameterGrid.from_log10(
-    log_s=[-0.2, 0.0, 0.2],
-    log_q=[-4.0, -3.5, -3.0],
-    log_rho=[-3.5, -3.0],
-)
-```
-
-## Search the generated maps
+## Open the atlas and search
 
 ```python
 import numpy as np
-from hammlet import Maps, Dataset, Geometry
+from hamagri import Atlas, Dataset, Geometry, SearchConfig
 
-data = np.loadtxt("lightcurve.dat")  # columns: time, flux, flux_error
-dataset = Dataset(time=data[:, 0], flux=data[:, 1], error=data[:, 2])
+samples = np.loadtxt('lightcurve.dat')  # time, flux, flux uncertainty
+dataset = Dataset(samples[:, 0], samples[:, 1], samples[:, 2])
+atlas = Atlas.open('hamagri-atlas')
 
-maps = Maps.open("maps")
-result = maps.search(
-    [dataset],
-    [Geometry(t0=2459000.0, u0=0.08, tE=24.0)],
+# Geometry values must use the same coordinate frame as the atlas.
+geometry = Geometry(
+    t0=2459000.0,
+    u0=0.08,
+    tE=24.0,
+    coordinate_frame=atlas.coordinate_frame,
 )
-
+result = atlas.search([dataset], [geometry], config=SearchConfig())
 best = result.candidates[0]
 print(best.s, best.q, best.rho, best.alpha, best.chi2)
-print(best.chi2_lower, best.chi2_upper)
 ```
 
-Multiple observatories are separate `Dataset` objects, so each receives its own
-analytically profiled source and blend flux. Multiple nearby `Geometry` seeds
-search `(t0,u0,tE)` as one compiled batch. The result defaults to 300 seeds for
-the next pipeline stage. The standard path ranks at `M=32`, rescans at `M=128`
-with cubic radial interpolation, then refines independent candidates at `M=512`
-with JAX-batched pattern and neighbour-map searches.
+`Atlas.open()` reads both bucketed and single-atlas directories. It memory-maps
+coefficient arrays and exposes `n_maps`, `map_ids`, `parameters`, `m_max`, and
+`coordinate_frame`. `Atlas.magnification(map_id, x, y)` reconstructs a map at
+Cartesian points.
 
-The FFT-stage `chi2_lower/upper` interval is preserved separately from the
-refined coefficient-space chi-square. Refinement never claims to be the final
-scientific VBM fit.
+The curated atlas uses the map coordinate frame. A geometry obtained in the
+native lens frame must not be passed as if it were already in the map frame:
+for wide binaries, the conversion depends on `(s, q, alpha)`. `hamagri` raises a
+clear error when the declared geometry frame and atlas frame differ; a single
+conversion for an atlas-wide FFT scan is not implemented yet.
 
-## Multi-machine generation
+## Search behavior
 
-Every map has a deterministic ID in this order:
+The default two-stage scan uses `(M, n_alpha) = (32, 144)` and `(128, 576)`.
+The alpha grid must place the highest quadratic light-curve harmonic strictly
+below the real-FFT Nyquist bin. For a map truncated at mode `M`, this requires
+an even `n_alpha >= 4*M + 2`. Unsafe settings fail before the scan starts with
+the required minimum and a radix-2 suggestion.
 
-```text
-for s in s_grid:
-    for q in q_grid:
-        for rho in rho_grid:
-            map_id += 1
+Search returns the profiled `chi2` and a `spectral_risk` ranking diagnostic.
+It does not return certified chi-square lower or upper limits. The atlas has
+adaptive reconstruction-error metadata for map-quality screening, but it does
+not include chi-square certificate arrays and `hamagri` does not claim a
+chi-square error guarantee. Re-evaluate retained seeds with direct
+VBMicrolensing before scientific inference.
+
+## Build maps
+
+```python
+from hamagri import MapConfig, ParameterGrid, build_maps
+
+grid = ParameterGrid(s=(0.8, 1.0, 1.2), q=(1e-4, 1e-3), rho=(3e-4, 1e-3))
+build_maps('maps', grid, config=MapConfig())
 ```
 
-Radial-layout buckets never split a `(s,q)` cell's rho axis. Distributed parts
-are contiguous groups of these complete buckets, so every machine can derive
-the same adaptive layout independently from the same JSON configuration.
-
-```bash
-hammlet build-maps examples/distributed_build.json /shared/hammlet-maps \
-  --part-index 0 --part-count 32
-```
-
-Submit the same command with indices `0..31`, then merge once:
-
-```bash
-hammlet merge-maps /shared/hammlet-maps
-```
-
-Completed parts are immutable. A job writes privately and becomes visible only
-after an atomic rename. Merge rejects missing parts, grid/config mismatches,
-duplicate map IDs, and incompatible coefficient formats. See
-[distributed generation](docs/distributed-generation.md) for scheduler
-examples and restart behavior.
-
-## Reproducible output
-
-Run:
-
-```bash
-python examples/build_and_plot.py
-```
-
-It builds a resonant-caustic map, independently evaluates a Cartesian reference
-with VBMicrolensing, and compares that reference with the Fourier reconstruction
-and its signed residual.
-
-![Direct VBM, Fourier reconstruction, residual, and coefficients](assets/vbm_fourier_residual.png)
+Adaptive angular sampling and radial-node placement target magnification-map
+quality. Builds retain reconstruction diagnostics but do not write
+`certified_error*.npy` arrays. These diagnostics do not guarantee a bound on a
+light-curve chi-square. `Atlas.search()` returns a profiled score and risk
+diagnostic without a certified chi-square interval. See [Python API](docs/api.md)
+and [Theory](docs/theory.md) for details.
 
 ## Documentation
 
-- [Mathematical method and algorithms](docs/theory.md)
-- [Python API and configuration](docs/api.md)
-- [Distributed generation and maps format](docs/distributed-generation.md)
-- [Three-machine production handoff](docs/three-machine-generation.md)
-- [Accuracy certificates and limitations](docs/accuracy.md)
+- [Python API](docs/api.md)
+- [Data release and atlas format](docs/data-release.md)
+- [Theory and search method](docs/theory.md)
+- [Distributed generation](docs/distributed-generation.md)
+- [Accuracy and limitations](docs/accuracy.md)
 - [Numerical validation plan](docs/validation-plan.md)
-- [Development and tests](docs/development.md)
-
-## Scope and important limitations
-
-- The stored certificate is deterministic relative to the two-dimensional
-  piecewise-linear reference through adaptive angular samples and nested radial
-  holdout rings.
-- Angular truncation, radial interpolation, and complex64 storage rounding are
-  propagated into the FFT-stage chi-square interval.
-- VBMicrolensing variation between unevaluated holdout rings and its own
-  internal numerical error are not analytically enclosed. Therefore, the
-  interval is not a formal enclosure of continuous direct VBM everywhere.
-- Always re-evaluate retained seeds with direct VBMicrolensing before scientific
-  inference.
+- [Development](docs/development.md)
+- [Map coordinate frame](docs/pspl-coordinate-frame-fft-search.md)
 
 ## License
 
-MIT. Please also respect the license and citation requirements of
+MIT. Please also follow the licenses and citation requirements of
 VBMicrolensing and JAX.

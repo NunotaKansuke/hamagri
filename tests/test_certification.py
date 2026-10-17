@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from hammlet._core.certification import (
+from hamagri._core.certification import (
     certify_sampled_ring,
     radial_interval_to_node_envelope,
     radial_piecewise_linear_residual_bound,
 )
-from hammlet._core.radial import (
+from hamagri._core.radial import (
     interpolate_coefficients,
     radial_stencil,
 )

@@ -3,8 +3,8 @@ from dataclasses import dataclass
 import numpy as np
 import pytest
 
-from hammlet import Dataset, Geometry, Maps, SearchConfig
-from hammlet._core.atlas_builder import MapBuildSpec, PolarAtlasBuilder
+from hamagri import Dataset, Geometry, Maps, SearchConfig
+from hamagri._core.atlas_builder import MapBuildSpec, PolarAtlasBuilder
 
 
 @dataclass
@@ -43,7 +43,7 @@ def test_reconstructs_cartesian_magnification(tmp_path):
 def test_end_to_end_search_returns_physical_parameters(tmp_path):
     maps = toy_maps(tmp_path / "maps")
     time = np.linspace(-1.0, 1.0, 60)
-    geometry = Geometry(t0=0.0, u0=0.2, tE=1.0)
+    geometry = Geometry(t0=0.0, u0=0.2, tE=1.0, coordinate_frame="map")
     tau = time
     x, y = -tau, np.full_like(tau, -0.2)
     flux = 1.7 * ToyEvaluator(0.3).magnification(x, y) + 0.4

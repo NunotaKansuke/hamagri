@@ -1,7 +1,7 @@
 import numpy as np
 
-from hammlet import MapConfig, ParameterGrid, SearchConfig
-from hammlet.build import _parameter_buckets
+from hamagri import MapConfig, ParameterGrid, SearchConfig
+from hamagri.build import _parameter_buckets
 
 
 def test_production_defaults_keep_high_modes_and_use_cubic_full_pass():
@@ -9,13 +9,13 @@ def test_production_defaults_keep_high_modes_and_use_cubic_full_pass():
     search = SearchConfig()
     assert maps.m_max == 512
     assert maps.core_m_max == 128
-    assert maps.radial_certificate_levels == 1
     assert search.full_m_max == 128
     assert search.handoff_m_max == 512
     assert search.refine_deep_levels == 10
     assert search.base_radial_order == 1
     assert search.full_radial_order == 3
-    assert search.certified_selection
+    assert search.base_n_alpha > 4 * search.base_m_max
+    assert search.full_n_alpha > 4 * search.full_m_max
     assert search.refine
 
 

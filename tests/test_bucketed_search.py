@@ -2,9 +2,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from hammlet import Dataset, Geometry, Maps, SearchConfig
-from hammlet._core.atlas_builder import MapBuildSpec, PolarAtlasBuilder
-from hammlet._core.bucketed_atlas import write_bucket_manifest
+from hamagri import Dataset, Geometry, Maps, SearchConfig
+from hamagri._core.atlas_builder import MapBuildSpec, PolarAtlasBuilder
+from hamagri._core.bucketed_atlas import write_bucket_manifest
 
 
 @dataclass
@@ -55,7 +55,7 @@ def test_bucketed_search_accepts_distinct_radial_layouts(tmp_path):
     write_bucket_manifest(root, entries)
 
     maps = Maps.open(root)
-    geometry = Geometry(t0=0.0, u0=0.2, tE=1.0)
+    geometry = Geometry(t0=0.0, u0=0.2, tE=1.0, coordinate_frame="map")
     time = np.linspace(-1.0, 1.0, 60)
     x, y = -time, np.full_like(time, -0.2)
     flux = 1.7 * ToyEvaluator(0.12).magnification(x, y) + 0.4
