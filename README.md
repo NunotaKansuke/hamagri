@@ -5,10 +5,11 @@ magnification maps, then uses them to produce candidate seeds for a downstream
 physical fit. Its search score is a profiled light-curve chi-square; a returned
 candidate is a seed, not a final scientific fit.
 
-The software repository and the large map atlas are separate releases. The
-curated atlas is distributed separately because it is about 72 GB. See
-[Data release](docs/data-release.md) for its manifest format and packaging
-status.
+The precomputed curated atlas is a separate data release because it is about
+72 GB. It is not stored in this software repository. You can generate maps
+with the code here without downloading that atlas; see [Map generation](docs/map-generation.md)
+for a small example and the full-grid workflow. The precomputed atlas and its
+format are described in [Data release](docs/data-release.md).
 
 ## Install
 
@@ -23,6 +24,12 @@ Map generation additionally requires VBMicrolensing:
 
 ```bash
 python -m pip install '.[generate]'
+```
+
+To install both sets of dependencies at once:
+
+```bash
+python -m pip install '.[search,generate]'
 ```
 
 ## Open the atlas and search
@@ -67,30 +74,45 @@ an even `n_alpha >= 4*M + 2`. Unsafe settings fail before the scan starts with
 the required minimum and a radix-2 suggestion.
 
 Search returns the profiled `chi2` and a `spectral_risk` ranking diagnostic.
-It does not return certified chi-square lower or upper limits. The atlas has
-adaptive reconstruction-error metadata for map-quality screening, but it does
-not include chi-square certificate arrays and `hamagri` does not claim a
-chi-square error guarantee. Re-evaluate retained seeds with direct
-VBMicrolensing before scientific inference.
+Re-evaluate retained seeds with direct VBMicrolensing before scientific
+inference.
 
 ## Build maps
 
-```python
-from hamagri import MapConfig, ParameterGrid, build_maps
+For a custom grid, install the generation extra and call `build_maps()`. This
+example builds a small 12-map collection:
 
-grid = ParameterGrid(s=(0.8, 1.0, 1.2), q=(1e-4, 1e-3), rho=(3e-4, 1e-3))
-build_maps('maps', grid, config=MapConfig())
+```python
+from hamagri import Atlas, MapConfig, ParameterGrid, build_maps
+
+grid = ParameterGrid(
+    s=(0.8, 1.0, 1.2),
+    q=(1e-4, 1e-3),
+    rho=(3e-4, 1e-3),
+)
+output = build_maps('maps', grid, config=MapConfig())
+atlas = Atlas.open(output)
+print(atlas.n_maps)
 ```
 
-Adaptive angular sampling and radial-node placement target magnification-map
-quality. Builds retain reconstruction diagnostics but do not write
-`certified_error*.npy` arrays. These diagnostics do not guarantee a bound on a
-light-curve chi-square. `Atlas.search()` returns a profiled score and risk
-diagnostic without a certified chi-square interval. See [Python API](docs/api.md)
-and [Theory](docs/theory.md) for details.
+To generate the full AdaMGrid default parameter set, run this command from the
+repository root:
+
+```bash
+python -m pip install '.[generate]'
+hamagri build-maps examples/adamgrid_default_60.json ./hamagri-atlas
+```
+
+The included configuration defines 33,993 maps with `m_max=512`. A full build
+is a large compute job and produces an atlas of about 72 GB; allow additional
+free space for checkpoints and intermediate files. The command above runs one
+partition. For a scheduler or multiple machines, follow the
+[distributed generation guide](docs/distributed-generation.md). The generated
+directory can be opened directly with `Atlas.open('./hamagri-atlas')`.
 
 ## Documentation
 
+- [Map generation](docs/map-generation.md)
 - [Python API](docs/api.md)
 - [Data release and atlas format](docs/data-release.md)
 - [Theory and search method](docs/theory.md)
