@@ -13,18 +13,30 @@ Contiguous assignment keeps nearby lens parameters together and requires no
 inter-machine messaging. `part_count` cannot exceed the number of non-empty
 radial buckets.
 
-## Scheduler example
+## Full-grid scheduler example
 
-For a Slurm array:
+Install the generation extra on each worker and run from the repository root.
+The included full-grid configuration defines 33,993 maps:
 
 ```bash
 #SBATCH --array=0-31
 #SBATCH --cpus-per-task=1
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
-hamagri build-maps config.json /shared/run-001 \
+hamagri build-maps examples/adamgrid_default_60.json /shared/run-001 \
   --part-index "$SLURM_ARRAY_TASK_ID" --part-count 32
 ```
+
+Each task writes its part under `/shared/run-001/parts/`. After all 32 array
+tasks have completed successfully, merge the parts once:
+
+```bash
+hamagri merge-maps /shared/run-001 --destination /shared/hamagri-atlas
+```
+
+The merge command checks that every part is present and that the parts were
+built from the same grid and map configuration. Keep the run directory until
+the merged atlas has been checked.
 
 VBMicrolensing generation is scalar inside each process. Use one scheduler job
 per partition; do not allow each job to spawn a second uncontrolled thread
@@ -66,10 +78,7 @@ maps/
 Core and extension mode files allow a low-mode pass to avoid reading production
 high modes. Coefficients are complex64 by default and arrays are NumPy `.npy`
 files so they can be memory-mapped. `manifest.json` records normalization,
-mode budgets, adaptive-sampling diagnostics, and shard membership. The public
-`hamagri build-maps` command does not persist `certified_error*.npy` arrays.
-The reader does not require those arrays, and public search does not return
-certified chi-square bounds.
+mode budgets, adaptive-sampling diagnostics, and shard membership.
 
 `hamagri-build.json` records the physical grid, generation config, partition,
 and selected global map IDs. Merge validates these records before copying
