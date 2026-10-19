@@ -87,6 +87,69 @@ A `Candidate` exposes the physical map parameters, profiled `chi2`, FFT score,
 spectral-risk diagnostic, refined trajectory parameters, and whether
 refinement changed the map ID. It has no `chi2_lower` or `chi2_upper` fields.
 
+## Direct physical fitting
+
+Install the `fit` extra to use `fit_candidates()`:
+
+```bash
+python -m pip install '.[fit]'
+```
+
+The fitting function takes search candidates and the same photometric datasets
+used for the search. `coordinate_frame` is required and must match the atlas
+frame. At least seven photometric points are needed to fit the seven physical
+parameters `(t0, u0, tE, s, q, rho, alpha)`.
+
+```python
+from hamagri import FitConfig, SearchConfig, fit_candidates
+
+search_result = atlas.search(
+    [dataset],
+    [geometry],
+    config=SearchConfig(candidate_count=3000),
+)
+fit_result = fit_candidates(
+    search_result.candidates,
+    [dataset],
+    coordinate_frame=atlas.coordinate_frame,
+    config=FitConfig(),
+)
+best_fit = fit_result.best
+print(best_fit.parameters.as_dict())
+print(best_fit.chi2, best_fit.success, best_fit.message)
+```
+
+The fitter first scores every seed with direct VBMicrolensing and profiles the
+source and blend flux for each dataset. It short-refines up to the best 500
+direct scores with Levenberg-Marquardt for at most 80 function evaluations.
+It then starts a longer fit, capped at 1,200 evaluations, from the best short
+fit for each `geometry_index`. These stages are local optimization from the
+provided seeds; inspect the result status and chi-square before using a fit.
+
+For map-frame candidates, every LM evaluation converts the map-frame
+trajectory to VBMicrolensing's native frame using the current `(s, q, alpha)`.
+This keeps `t0` and `u0` in the map frame throughout the optimization. Candidates
+are processed serially. Set `FitConfig(long_max_nfev=None)` to skip the longer
+stage.
+
+`FitResult.direct_scores` contains the direct score for every input candidate;
+`short_fits` and `long_fits` contain optimizer results for each stage; and
+`best` is the lowest-chi-square result in the last stage that ran. Each fit
+result includes its initial and final parameters and chi-square, optimizer
+status, evaluation counts, and the last objective error if one occurred.
+
+### FitConfig
+
+| Field | Default | Meaning |
+|---|---:|---|
+| `short_count` | 500 | number of best direct scores to short-refine |
+| `short_max_nfev` | 80 | maximum short-stage function evaluations per seed |
+| `long_max_nfev` | 1200 | maximum long-stage evaluations per geometry; `None` skips it |
+| `diff_step` | `1e-3` | relative finite-difference step used by SciPy |
+| `vbm_tolerance` | `1e-3` | VBMicrolensing absolute tolerance |
+| `vbm_relative_tolerance` | `1e-4` | VBMicrolensing relative tolerance |
+| `ftol`, `xtol`, `gtol` | `1e-8` | LM convergence tolerances |
+
 ## Build maps
 
 ```python

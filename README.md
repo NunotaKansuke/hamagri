@@ -20,16 +20,22 @@ install the search dependencies:
 python -m pip install '.[search]'
 ```
 
+Direct physical fitting requires VBMicrolensing and SciPy:
+
+```bash
+python -m pip install '.[fit]'
+```
+
 Map generation additionally requires VBMicrolensing:
 
 ```bash
 python -m pip install '.[generate]'
 ```
 
-To install both sets of dependencies at once:
+To install search, fitting, and map generation together:
 
 ```bash
-python -m pip install '.[search,generate]'
+python -m pip install '.[search,fit,generate]'
 ```
 
 ## Open the atlas and search
@@ -74,8 +80,43 @@ an even `n_alpha >= 4*M + 2`. Unsafe settings fail before the scan starts with
 the required minimum and a radix-2 suggestion.
 
 Search returns the profiled `chi2` and a `spectral_risk` ranking diagnostic.
-Re-evaluate retained seeds with direct VBMicrolensing before scientific
-inference.
+Use `fit_candidates()` to re-evaluate seeds with direct VBMicrolensing and
+locally optimize their physical parameters before scientific inference.
+
+## Direct physical fitting
+
+`fit_candidates()` screens every returned seed with VBMicrolensing, runs a
+short Levenberg-Marquardt fit on the best 500 direct scores, then runs a longer
+fit on the best short-fit seed for each input geometry. It adjusts
+`(t0, u0, tE, s, q, rho, alpha)` and profiles source and blend fluxes for each
+dataset. The default iteration limits are 80 evaluations for the short stage
+and 1,200 for the long stage. These stages are local optimization from search
+seeds; inspect `success`, `message`, and `chi2` in the returned result.
+
+```python
+from hamagri import FitConfig, SearchConfig, fit_candidates
+
+search_result = atlas.search(
+    [dataset],
+    [geometry],
+    config=SearchConfig(candidate_count=3000),
+)
+fit_result = fit_candidates(
+    search_result.candidates,
+    [dataset],
+    coordinate_frame=atlas.coordinate_frame,
+    config=FitConfig(),
+)
+best_fit = fit_result.best
+print(best_fit.parameters.as_dict())
+print(best_fit.chi2, best_fit.success, best_fit.message)
+```
+
+The fitter supports both `map` and `native` coordinate frames. For map-frame
+fits it converts each trial trajectory to VBMicrolensing's native frame during
+every objective evaluation, keeping the fitted trajectory parameters in the
+atlas frame. It evaluates candidates serially. Set `long_max_nfev=None` to
+return only the short-fit stage.
 
 ## Build maps
 
