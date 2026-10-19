@@ -95,6 +95,12 @@ Install the `fit` extra to use `fit_candidates()`:
 python -m pip install '.[fit]'
 ```
 
+For the full search-to-fit workflow shown below, install both extras:
+
+```bash
+python -m pip install '.[search,fit]'
+```
+
 The fitting function takes search candidates and the same photometric datasets
 used for the search. `coordinate_frame` is required and must match the atlas
 frame. At least seven photometric points are needed to fit the seven physical

@@ -26,6 +26,12 @@ Direct physical fitting requires VBMicrolensing and SciPy:
 python -m pip install '.[fit]'
 ```
 
+If you also run atlas search in the same environment, install both extras:
+
+```bash
+python -m pip install '.[search,fit]'
+```
+
 Map generation additionally requires VBMicrolensing:
 
 ```bash
