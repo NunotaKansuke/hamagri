@@ -5,11 +5,11 @@ magnification maps, then uses them to produce candidate seeds for a downstream
 physical fit. Its search score is a profiled light-curve chi-square; a returned
 candidate is a seed, not a final scientific fit.
 
-The precomputed curated atlas is a separate data release because it is about
-72 GB. It is not stored in this software repository. You can generate maps
-with the code here without downloading that atlas; see [Map generation](docs/map-generation.md)
-for a small example and the full-grid workflow. The precomputed atlas and its
-format are described in [Data release](docs/data-release.md).
+The precomputed curated atlas is a separate data product because it is about
+72 GB; it is not stored in this software repository. You can generate maps
+with the code here without downloading it; see [Map generation](docs/map-generation.md)
+for a small example and the full-grid workflow. Its format and use are described
+in [Atlas data](docs/atlas-data.md).
 
 ## Install
 
@@ -161,13 +161,13 @@ directory can be opened directly with `Atlas.open('./hamagri-atlas')`.
 
 - [Map generation](docs/map-generation.md)
 - [Python API](docs/api.md)
-- [Data release and atlas format](docs/data-release.md)
+- [Atlas data and format](docs/atlas-data.md)
 - [Theory and search method](docs/theory.md)
 - [Distributed generation](docs/distributed-generation.md)
 - [Accuracy and limitations](docs/accuracy.md)
 - [Numerical validation plan](docs/validation-plan.md)
 - [Development](docs/development.md)
-- [Map coordinate frame](docs/pspl-coordinate-frame-fft-search.md)
+- [Coordinate frames](docs/coordinate-frames.md)
 
 ## License
 

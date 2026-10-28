@@ -62,7 +62,6 @@ A user who only needs a smaller or different parameter range can pass a custom
 ## Precomputed atlas
 
 The curated, precomputed atlas is distributed separately from the software
-because of its size. Its data record will be linked from
-[Data release](data-release.md) when public. Downloading it is only needed if
-you want to use that prebuilt collection; it is not a prerequisite for map
-generation.
+because of its size (about 72 GB). It is not a prerequisite for map generation.
+See [Atlas data](atlas-data.md) for information about the data product and its
+format.
