@@ -44,7 +44,7 @@ The curated atlas (~72 GB) is distributed separately; see [Atlas data](docs/atla
 
 ## Acknowledgments
 
-OpenAI Codex and Claude Code were used as coding assistants during development.
+OpenAI Codex was used as a coding assistant during development.
 
 ## License
 
