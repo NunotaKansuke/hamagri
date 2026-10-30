@@ -1,175 +1,42 @@
 # hamagri
 
-`hamagri` builds and reads Fourier atlases for binary microlensing
-magnification maps, then uses them to produce candidate seeds for a downstream
-physical fit. Its search score is a profiled light-curve chi-square; a returned
-candidate is a seed, not a final scientific fit.
-
-The precomputed curated atlas is a separate data product because it is about
-72 GB; it is not stored in this software repository. You can generate maps
-with the code here without downloading it; see [Map generation](docs/map-generation.md)
-for a small example and the full-grid workflow. Its format and use are described
-in [Atlas data](docs/atlas-data.md).
+`hamagri` builds Fourier atlases for binary microlensing and searches them for
+candidate seeds. Re-evaluate candidates with direct VBMicrolensing before
+scientific inference.
 
 ## Install
 
-Requires Python 3.10 or later. From a checkout of the `hamagri` repository,
-install the search dependencies:
+Python 3.10 or later. From the repository root:
 
 ```bash
-python -m pip install '.[search]'
+python -m pip install '.[all]'
 ```
 
-Direct physical fitting requires VBMicrolensing and SciPy:
-
-```bash
-python -m pip install '.[fit]'
-```
-
-If you also run atlas search in the same environment, install both extras:
-
-```bash
-python -m pip install '.[search,fit]'
-```
-
-Map generation additionally requires VBMicrolensing:
-
-```bash
-python -m pip install '.[generate]'
-```
-
-To install search, fitting, and map generation together:
-
-```bash
-python -m pip install '.[search,fit,generate]'
-```
-
-## Open the atlas and search
+## Quick start
 
 ```python
 import numpy as np
-from hamagri import Atlas, Dataset, Geometry, SearchConfig
+from hamagri import Atlas, Dataset, Geometry
 
-samples = np.loadtxt('lightcurve.dat')  # time, flux, flux uncertainty
-dataset = Dataset(samples[:, 0], samples[:, 1], samples[:, 2])
-atlas = Atlas.open('hamagri-atlas')
-
-# Geometry values must use the same coordinate frame as the atlas.
+data = np.loadtxt("lightcurve.dat")  # time, flux, uncertainty
+dataset = Dataset(data[:, 0], data[:, 1], data[:, 2])
+atlas = Atlas.open("hamagri-atlas")
 geometry = Geometry(
-    t0=2459000.0,
-    u0=0.08,
-    tE=24.0,
+    t0=2459000.0, u0=0.08, tE=24.0,
     coordinate_frame=atlas.coordinate_frame,
 )
-result = atlas.search([dataset], [geometry], config=SearchConfig())
-best = result.candidates[0]
+best = atlas.search([dataset], [geometry]).candidates[0]
 print(best.s, best.q, best.rho, best.alpha, best.chi2)
 ```
 
-`Atlas.open()` reads both bucketed and single-atlas directories. It memory-maps
-coefficient arrays and exposes `n_maps`, `map_ids`, `parameters`, `m_max`, and
-`coordinate_frame`. `Atlas.magnification(map_id, x, y)` reconstructs a map at
-Cartesian points.
-
-The curated atlas uses the map coordinate frame. A geometry obtained in the
-native lens frame must not be passed as if it were already in the map frame:
-for wide binaries, the conversion depends on `(s, q, alpha)`. `hamagri` raises a
-clear error when the declared geometry frame and atlas frame differ; a single
-conversion for an atlas-wide FFT scan is not implemented yet.
-
-## Search behavior
-
-The default two-stage scan uses `(M, n_alpha) = (32, 144)` and `(128, 576)`.
-The alpha grid must place the highest quadratic light-curve harmonic strictly
-below the real-FFT Nyquist bin. For a map truncated at mode `M`, this requires
-an even `n_alpha >= 4*M + 2`. Unsafe settings fail before the scan starts with
-the required minimum and a radix-2 suggestion.
-
-Search returns the profiled `chi2` and a `spectral_risk` ranking diagnostic.
-Use `fit_candidates()` to re-evaluate seeds with direct VBMicrolensing and
-locally optimize their physical parameters before scientific inference.
-
-## Direct physical fitting
-
-`fit_candidates()` screens every returned seed with VBMicrolensing, runs a
-short Levenberg-Marquardt fit on the best 500 direct scores, then runs a longer
-fit on the best short-fit seed for each input geometry. It adjusts
-`(t0, u0, tE, s, q, rho, alpha)` and profiles source and blend fluxes for each
-dataset. The default iteration limits are 80 evaluations for the short stage
-and 1,200 for the long stage. These stages are local optimization from search
-seeds; inspect `success`, `message`, and `chi2` in the returned result.
-
-```python
-from hamagri import FitConfig, SearchConfig, fit_candidates
-
-search_result = atlas.search(
-    [dataset],
-    [geometry],
-    config=SearchConfig(candidate_count=3000),
-)
-fit_result = fit_candidates(
-    search_result.candidates,
-    [dataset],
-    coordinate_frame=atlas.coordinate_frame,
-    config=FitConfig(),
-)
-best_fit = fit_result.best
-print(best_fit.parameters.as_dict())
-print(best_fit.chi2, best_fit.success, best_fit.message)
-```
-
-The fitter supports both `map` and `native` coordinate frames. For map-frame
-fits it converts each trial trajectory to VBMicrolensing's native frame during
-every objective evaluation, keeping the fitted trajectory parameters in the
-atlas frame. It evaluates candidates serially. Set `long_max_nfev=None` to
-return only the short-fit stage.
-
-## Build maps
-
-For a custom grid, install the generation extra and call `build_maps()`. This
-example builds a small 12-map collection:
-
-```python
-from hamagri import Atlas, MapConfig, ParameterGrid, build_maps
-
-grid = ParameterGrid(
-    s=(0.8, 1.0, 1.2),
-    q=(1e-4, 1e-3),
-    rho=(3e-4, 1e-3),
-)
-output = build_maps('maps', grid, config=MapConfig())
-atlas = Atlas.open(output)
-print(atlas.n_maps)
-```
-
-To generate the full AdaMGrid default parameter set, run this command from the
-repository root:
-
-```bash
-python -m pip install '.[generate]'
-hamagri build-maps examples/adamgrid_default_60.json ./hamagri-atlas
-```
-
-The included configuration defines 33,993 maps with `m_max=512`. A full build
-is a large compute job and produces an atlas of about 72 GB; allow additional
-free space for checkpoints and intermediate files. The command above runs one
-partition. For a scheduler or multiple machines, follow the
-[distributed generation guide](docs/distributed-generation.md). The generated
-directory can be opened directly with `Atlas.open('./hamagri-atlas')`.
+The curated atlas (~72 GB) is distributed separately; see [Atlas data](docs/atlas-data.md).
 
 ## Documentation
 
-- [Map generation](docs/map-generation.md)
-- [Python API](docs/api.md)
-- [Atlas data and format](docs/atlas-data.md)
-- [Theory and search method](docs/theory.md)
-- [Distributed generation](docs/distributed-generation.md)
-- [Accuracy and limitations](docs/accuracy.md)
-- [Numerical validation plan](docs/validation-plan.md)
-- [Development](docs/development.md)
-- [Coordinate frames](docs/coordinate-frames.md)
+[API](docs/api.md) · [Theory](docs/theory.md) · [Accuracy](docs/accuracy.md) ·
+[Map generation](docs/map-generation.md) ·
+[Distributed generation](docs/distributed-generation.md)
 
 ## License
 
-MIT. Please also follow the licenses and citation requirements of
-VBMicrolensing and JAX.
+MIT. Follow the license and citation requirements of VBMicrolensing and JAX.
