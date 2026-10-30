@@ -6,10 +6,10 @@ scientific inference.
 
 ## Install
 
-Python 3.10 or later. From the repository root:
+Python 3.10 or later:
 
 ```bash
-python -m pip install '.[all]'
+python -m pip install "hamagri[all] @ git+https://github.com/NunotaKansuke/hamagri.git"
 ```
 
 ## Quick start
@@ -33,7 +33,8 @@ The curated atlas (~72 GB) is distributed separately; see [Atlas data](docs/atla
 
 ## Documentation
 
-[API](docs/api.md) · [Theory](docs/theory.md) · [Accuracy](docs/accuracy.md) ·
+[API](docs/api.md) · [Atlas data](docs/atlas-data.md) · [Accuracy](docs/accuracy.md) ·
+[Coordinate frames](docs/coordinate-frames.md) · [Theory](docs/theory.md) ·
 [Map generation](docs/map-generation.md) ·
 [Distributed generation](docs/distributed-generation.md)
 
