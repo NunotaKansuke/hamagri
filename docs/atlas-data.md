@@ -12,6 +12,18 @@ to a separately distributed atlas. Follow the license, attribution, and
 citation terms supplied with the specific atlas you use, as well as the
 licenses of VBMicrolensing and other dependencies.
 
+## Release status and provenance
+
+The curated atlas contains 33,993 maps (~72 GB) and is packaged as four
+checksum-verified archives. Public download hosting is being arranged; a
+download link and citation details will be added here when the data release is
+available.
+
+The atlas was produced over several months using Grid Engine jobs. The
+recorded initial setup used 30 independent single-thread workers across three
+hosts. Job concurrency varied in later stages and retries, so 30 is not a
+single core count for the full run or a total CPU-hour figure.
+
 ## Atlas format
 
 A bucketed atlas has a root `manifest.json` and a `buckets/` directory.
