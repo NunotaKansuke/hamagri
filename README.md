@@ -6,10 +6,10 @@ scientific inference.
 
 ## Install
 
-Python 3.10 or later:
+Python 3.10 or later and Git:
 
 ```bash
-python -m pip install "hamagri[all] @ git+https://github.com/NunotaKansuke/hamagri.git"
+python -m pip install --upgrade "hamagri[all] @ git+https://github.com/NunotaKansuke/hamagri.git@main"
 ```
 
 ## Quick start
