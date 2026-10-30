@@ -1,6 +1,6 @@
 # Development
 
-Create an isolated environment and install the editable package:
+Install an editable development version and run the checks:
 
 ```bash
 python -m pip install -e ".[all,dev]"
@@ -8,22 +8,6 @@ pytest -q
 ruff check src tests examples
 ```
 
-The unit suite uses analytic toy magnification evaluators and does not spend
-VBM calls. The documented figure is the lightweight direct-VBM integration
-test:
-
-```bash
-python examples/build_and_plot.py
-```
-
-Before changing numerical defaults, benchmark at least one smooth event, one
-central-caustic crossing, and one planetary-caustic event. Report cold JAX
-compile time separately from steady-state scan time. Any new error claim must
-state its reference function and whether radial interpolation and VBM internal
-tolerances are enclosed.
-
-The required strata, phase boundaries, metadata, and acceptance gate are defined
-in [the numerical validation plan](validation-plan.md).
-
-For rebuilding VBMicrolensing 5.5 for old-glibc hosts, see the
-[VBMicrolensing compatibility build](vbm-compatibility.md).
+`examples/build_and_plot.py` is a small direct-VBMicrolensing integration
+example. For older Linux systems, see
+[VBMicrolensing compatibility](vbm-compatibility.md).
