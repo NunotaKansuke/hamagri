@@ -19,10 +19,7 @@ checksum-verified archives. Public download hosting is being arranged; a
 download link and citation details will be added here when the data release is
 available.
 
-The atlas was produced over several months using Grid Engine jobs. The
-recorded initial setup used 30 independent single-thread workers across three
-hosts. Job concurrency varied in later stages and retries, so 30 is not a
-single core count for the full run or a total CPU-hour figure.
+The curated atlas was generated over several months.
 
 ## Atlas format
 
