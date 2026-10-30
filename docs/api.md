@@ -87,12 +87,13 @@ runs a longer fit from the best short fit for each input geometry. These are
 local fits from the supplied seeds, not a global search.
 
 ```python
-from hamagri import fit_candidates
+from hamagri import FitConfig, fit_candidates
 
 fit_result = fit_candidates(
     result.candidates,
     [dataset],
     coordinate_frame=atlas.coordinate_frame,
+    config=FitConfig(),
 )
 best_fit = fit_result.best
 print(best_fit.parameters.as_dict())
