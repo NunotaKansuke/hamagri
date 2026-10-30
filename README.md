@@ -31,6 +31,10 @@ print(best.s, best.q, best.rho, best.alpha, best.chi2)
 
 The curated atlas (~72 GB) is distributed separately; see [Atlas data](docs/atlas-data.md).
 
+## Related project
+
+[AdaMGrid](https://github.com/zhangjiyuan22/AdaMGrid) is an adaptive magnification-map grid-search project for binary and triple microlensing. `hamagri` focuses on Fourier-atlas searches for binary lenses; its map-generation guide includes the AdaMGrid default parameter grid.
+
 ## Documentation
 
 [API](docs/api.md) · [Atlas data](docs/atlas-data.md) · [Accuracy](docs/accuracy.md) ·
