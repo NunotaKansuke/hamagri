@@ -42,6 +42,10 @@ The curated atlas (~72 GB) is distributed separately; see [Atlas data](docs/atla
 [Map generation](docs/map-generation.md) ·
 [Distributed generation](docs/distributed-generation.md)
 
+## Acknowledgments
+
+OpenAI Codex and Claude Code were used as coding assistants during development.
+
 ## License
 
 MIT. Follow the license and citation requirements of VBMicrolensing and JAX.
