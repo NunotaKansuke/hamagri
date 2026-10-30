@@ -29,7 +29,7 @@ best = atlas.search([dataset], [geometry]).candidates[0]
 print(best.s, best.q, best.rho, best.alpha, best.chi2)
 ```
 
-The curated atlas (~72 GB) is distributed separately; see [Atlas data](docs/atlas-data.md).
+The curated atlas (~72 GB) is prepared as a separate data release; public download hosting is being arranged. See [Atlas data](docs/atlas-data.md) for its format and release status.
 
 ## Related project
 
