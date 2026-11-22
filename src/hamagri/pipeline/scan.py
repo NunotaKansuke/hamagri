@@ -154,7 +154,7 @@ def scan_profiles(maps: Atlas, datasets: Sequence[PhotometricDataset],
     started = time.perf_counter()
     factory = ConsistentKernelFactory(datasets, geometries, m_max, radial_order=radial_order)
     radius = _max_radius(datasets, geometries)
-    scanner = None
+    scanner, scanner_nodes = None, -1
     ids, params, chi2, alpha = [], [], [], []
     for bucket_index, (nodes, shards) in enumerate(_sources(maps, m_max)):
         tail = _tail_nodes(nodes, radius, radial_order)

@@ -60,7 +60,7 @@ from typing import Any, Callable
 import numpy as np
 
 from .hills import Landscape, map_vector, native_parameters
-from .objective import COARSE, FINE, EventModel, Objective, lm, timescale_chart
+from .objective import COARSE, EventModel, Objective, lm, timescale_chart
 
 # (u0, alpha) -> (-u0, -alpha) reflects a static light curve onto itself; in
 # the map-frame vector it negates u0 tE and alpha.  Parallax breaks the
