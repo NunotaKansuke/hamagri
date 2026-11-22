@@ -195,6 +195,8 @@ class MapConfig:
     caustic_points_per_side: int = 4
     vbm_tolerance: float = 1.0e-3
     vbm_relative_tolerance: float = 1.0e-4
+    # "auto": BinaryMag2, with rings that fail a BinaryMag2/MultiMag2 probe on MultiMag2.
+    vbm_method: str = "auto"
     shard_size: int = 256
     radial_s_buckets: int = 4
     radial_q_buckets: int = 4
@@ -236,6 +238,8 @@ class MapConfig:
             raise ValueError("radial_max must be positive")
         if self.coordinate_frame not in ("map", "native"):
             raise ValueError("coordinate_frame must be 'map' or 'native'")
+        if self.vbm_method not in ("auto", "binary", "multipoly"):
+            raise ValueError("vbm_method must be 'auto', 'binary' or 'multipoly'")
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)

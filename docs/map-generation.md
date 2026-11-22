@@ -62,6 +62,8 @@ A user who only needs a smaller or different parameter range can pass a custom
 ## Precomputed atlas
 
 The curated, precomputed atlas is distributed separately from the software
-because of its size (about 72 GB). It is not a prerequisite for map generation.
+because of its size (about 72 GB), together with an addition set for Roman
+(resonant-zone s refinement and log q down to -7; see
+[Atlas data](atlas-data.md#roman-additions)). It is not a prerequisite for map generation.
 See [Atlas data](atlas-data.md) for information about the data product and its
 format.

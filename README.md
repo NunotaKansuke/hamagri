@@ -1,8 +1,9 @@
 # hamagri
 
 `hamagri` builds Fourier atlases for binary microlensing and searches them for
-candidate seeds. Re-evaluate candidates with direct VBMicrolensing before
-scientific inference.
+candidate seeds. Its event pipeline turns those seeds into binary-lens
+solutions with direct VBMicrolensing: a battle-royale search, an LM polish,
+rho/u0 profiles and a final free-parallax fit ([Event pipeline](docs/pipeline.md)).
 
 ## Install
 
@@ -37,7 +38,7 @@ The curated atlas (~72 GB) is prepared as a separate data release; public downlo
 
 ## Documentation
 
-[API](docs/api.md) · [Atlas data](docs/atlas-data.md) · [Accuracy](docs/accuracy.md) ·
+[API](docs/api.md) · [Event pipeline](docs/pipeline.md) · [Atlas data](docs/atlas-data.md) · [Accuracy](docs/accuracy.md) ·
 [Coordinate frames](docs/coordinate-frames.md) · [Theory](docs/theory.md) ·
 [Map generation](docs/map-generation.md) ·
 [Distributed generation](docs/distributed-generation.md)

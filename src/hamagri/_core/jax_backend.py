@@ -263,6 +263,9 @@ class JAXConsistentGeometryBatchScanner:
         self.product_grid_size = product_grid_size(self.m_max)
         self._compiled_scan = jax.jit(self._scan_impl)
         self._compiled_scan_minima = jax.jit(self._scan_minima_impl)
+        self._compiled_scan_minima_by_geometry = jax.jit(
+            self._scan_minima_by_geometry_impl
+        )
         self._compiled_scan_minima_with_error = jax.jit(
             self._scan_minima_with_error_impl
         )
@@ -572,6 +575,32 @@ class JAXConsistentGeometryBatchScanner:
             self._jnp.min(upper, axis=(1, 2)),
         )
 
+    def _scan_minima_by_geometry_impl(
+        self,
+        x_coeff,
+        weights,
+        weighted_flux,
+        square_lags,
+        weight_sum,
+        flux_sum,
+        flux2_sum,
+    ):
+        """Reduce only the alpha axis, keeping one minimum per geometry."""
+        chi2 = self._scan_impl(
+            x_coeff,
+            weights,
+            weighted_flux,
+            square_lags,
+            weight_sum,
+            flux_sum,
+            flux2_sum,
+        )
+        alpha_index = self._jnp.argmin(chi2, axis=2)
+        minimum = self._jnp.take_along_axis(
+            chi2, alpha_index[:, :, None], axis=2
+        )[:, :, 0]
+        return minimum, alpha_index
+
     def _reduce_minima(self, chi2):
         flat_chi2 = chi2.reshape((chi2.shape[0], -1))
         flat_index = self._jnp.argmin(flat_chi2, axis=1)
@@ -718,6 +747,22 @@ class JAXConsistentGeometryBatchScanner:
             self._flux_sum,
             self._flux2_sum,
             self._jnp.asarray(feasible),
+        )
+        return tuple(np.asarray(value) for value in result)
+
+    def scan_minima_by_geometry(
+        self, x_coeff: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Return ``(n_map, n_geometry)`` alpha-minimum chi-square and alpha index."""
+        x_coeff = self._validate_coefficients(x_coeff)
+        result = self._compiled_scan_minima_by_geometry(
+            self._jnp.asarray(x_coeff),
+            self._weights,
+            self._weighted_flux,
+            self._square_lags,
+            self._weight_sum,
+            self._flux_sum,
+            self._flux2_sum,
         )
         return tuple(np.asarray(value) for value in result)
 

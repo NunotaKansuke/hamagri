@@ -21,6 +21,28 @@ available.
 
 The curated atlas was generated over several months.
 
+### Roman additions
+
+The atlas is aimed at the Nancy Grace Roman Space Telescope's Galactic
+Bulge Time Domain Survey. End-to-end tests of the
+[event pipeline](pipeline.md) on simulated Roman light curves showed where
+the base grid was too coarse or too narrow. In most of the failed searches,
+the correct solution fell between grid points in the resonant-caustic zone,
+or below the smallest mass ratio. An addition set of 5,781 maps
+(39,774 maps in total) closes these two gaps:
+
+| set | maps | what it adds |
+|---|---:|---|
+| resonant s refinement | 4,401 | log s midpoints (+0.025 dex) inside the resonant-caustic zone of each q, widened by 0.1 dex on both sides; every active log q row and the nine base log rho levels |
+| low-q extension | 1,380 | log q = -7.0 ... -6.1 on the base s lattice (plus the midpoints above), with the same active (s, q) rule continued |
+
+A new map is kept only while its finite-source planetary signal
+`2 q / rho^2` is at least 0.3 %, that is, `rho <= sqrt(667 q)`. Larger
+sources at that q would add maps that are indistinguishable from a point
+lens. The additions were built with `hamagri add-maps` and joined to the
+base atlas with `hamagri combine-maps` (see [Event pipeline](pipeline.md)).
+They will be distributed with the data release.
+
 ## Atlas format
 
 A bucketed atlas has a root `manifest.json` and a `buckets/` directory.

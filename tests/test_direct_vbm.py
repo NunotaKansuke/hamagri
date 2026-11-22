@@ -6,6 +6,7 @@ import sys
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from hamagri import Dataset, Geometry, Maps, SearchConfig
 from hamagri._core.atlas import PolarAtlas
@@ -112,10 +113,10 @@ def test_vbm_coordinate_frames_are_physically_equivalent(monkeypatch) -> None:
     x = np.asarray([-0.4, 0.0, 0.8])
     y = np.asarray([0.2, -0.3, 0.5])
     native = VBMBinaryLensEvaluator(
-        separation, mass_ratio, 0.01, coordinate_frame="native"
+        separation, mass_ratio, 0.01, coordinate_frame="native", method="binary"
     )
     map_frame = VBMBinaryLensEvaluator(
-        separation, mass_ratio, 0.01, coordinate_frame="map"
+        separation, mass_ratio, 0.01, coordinate_frame="map", method="binary"
     )
 
     np.testing.assert_allclose(
@@ -125,6 +126,150 @@ def test_vbm_coordinate_frames_are_physically_equivalent(monkeypatch) -> None:
         native.caustic_components[0][:, 0] - shift,
         map_frame.caustic_components[0][:, 0],
     )
+
+
+def test_vbm_auto_switches_only_rings_failing_the_probe(monkeypatch) -> None:
+    class FakeVbm:
+        Method = SimpleNamespace(Multipoly="multipoly")
+
+        def __init__(self):
+            self.Tol = self.RelTol = self.a1 = None
+
+        def Caustics(self, separation, mass_ratio):
+            return [np.asarray([[0.0, 0.01], [0.01, 0.0], [0.0, -0.01], [0.0, 0.01]])]
+
+        def SetMethod(self, method):
+            pass
+
+        def SetLensGeometry(self, geometry):
+            pass
+
+        def BinaryMag2(self, separation, mass_ratio, x, y, source_radius):
+            # Round-off-like failure inside r < 0.1 only.
+            return 2.0 + (0.5 if np.hypot(x, y) < 0.1 else 0.0)
+
+        def MultiMag2(self, x, y, source_radius):
+            return 2.0
+
+    monkeypatch.setitem(
+        sys.modules, "VBMicrolensing", SimpleNamespace(VBMicrolensing=FakeVbm)
+    )
+    evaluator = VBMBinaryLensEvaluator(
+        1.0, 0.5, 0.01, coordinate_frame="native", method="auto"
+    )
+    angles = np.linspace(0.0, 2.0 * np.pi, 16, endpoint=False)
+    for radius in (0.05, 1.0):
+        values = evaluator.magnification(
+            radius * np.cos(angles), radius * np.sin(angles)
+        )
+        np.testing.assert_allclose(values, 2.0)
+    assert evaluator.ring_uses_multipoly(0.05)
+    assert not evaluator.ring_uses_multipoly(1.0)
+
+
+def test_vbm_multipoly_survives_a_crashing_point(monkeypatch) -> None:
+    import os
+    import signal
+
+    crash_x = 0.3
+
+    class FakeVbm:
+        Method = SimpleNamespace(Multipoly="multipoly")
+
+        def __init__(self):
+            self.Tol = self.RelTol = self.a1 = None
+
+        def Caustics(self, separation, mass_ratio):
+            return [np.asarray([[0.0, 0.01], [0.01, 0.0], [0.0, -0.01], [0.0, 0.01]])]
+
+        def SetMethod(self, method):
+            pass
+
+        def SetLensGeometry(self, geometry):
+            pass
+
+        def BinaryMag2(self, separation, mass_ratio, x, y, source_radius):
+            return 5.0
+
+        def MultiMag2(self, x, y, source_radius):
+            # Like the VBM 5.6.1 use-after-free: only the exact position aborts.
+            if x == crash_x and y == 0.0:
+                os.kill(os.getpid(), signal.SIGKILL)
+            return 2.0 + x
+
+    monkeypatch.setitem(
+        sys.modules, "VBMicrolensing", SimpleNamespace(VBMicrolensing=FakeVbm)
+    )
+    evaluator = VBMBinaryLensEvaluator(
+        1.0, 0.5, 0.01, coordinate_frame="native", method="multipoly"
+    )
+    assert evaluator.isolate_multipoly
+    x = np.asarray([0.1, 0.2, crash_x, 0.4])
+    values = evaluator.magnification(x, np.zeros_like(x))
+    np.testing.assert_allclose(values, 2.0 + x, rtol=0.0, atol=1.0e-9)
+    assert evaluator.crash_recoveries == 1
+
+
+def test_builder_retries_unconverged_auto_ring_with_multipoly() -> None:
+    class ProbeMissingEvaluator:
+        """Binary is noisy on ring 0.5 away from the probe angles; multipoly is smooth."""
+
+        source_radius = 0.01
+        caustic_components: tuple[np.ndarray, ...] = ()
+
+        def __init__(self):
+            self.multipoly: dict[float, bool] = {}
+
+        def ring_uses_multipoly(self, radius):
+            return self.multipoly.get(round(float(radius), 12), False)
+
+        def force_multipoly(self, radius, enabled=True):
+            key = round(float(radius), 12)
+            if self.multipoly.get(key, False) == enabled:
+                return False
+            self.multipoly[key] = enabled
+            return True
+
+        def magnification(self, x, y):
+            x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+            radius = float(np.hypot(x.ravel()[0], y.ravel()[0]))
+            smooth = 2.0 + 0.1 * x
+            if self.ring_uses_multipoly(radius) or abs(radius - 0.5) > 1e-9:
+                return smooth
+            noise = np.sin(1.0e4 * np.arctan2(y, x)) ** 2
+            return smooth + 0.3 * noise
+
+    config = _config(m_max=4, core_m_max=2, diagnostic_m_max=8, build_radial_certificate=False)
+    builder = DirectVBMPolarAtlasBuilder(
+        np.asarray([0.1, 0.5, 1.0]), spectrum_config=config, shard_size=2
+    )
+    evaluator = ProbeMissingEvaluator()
+    builder.sample(evaluator)
+    diagnostics = builder._map_diagnostics[-1]
+
+    assert diagnostics["converged"].all()
+    assert diagnostics["vbm_multipoly"].tolist() == [False, True, False]
+
+
+def test_builder_widens_guard_for_caustic_just_outside_it() -> None:
+    class NearCausticRing:
+        """A caustic 0.05 outside ring 1.0 gives a peak the uniform grid cannot resolve."""
+
+        source_radius = 0.001
+        caustic_components = (np.asarray([[1.05, -0.01], [1.05, 0.01]]),)
+
+        def magnification(self, x, y):
+            angle = np.arctan2(y, x)
+            return 1.4 + 0.02 / (angle**2 + 0.01**2) * 1.0e-3
+
+    config = _config(m_max=8, core_m_max=4, diagnostic_m_max=16, build_radial_certificate=False)
+    nodes = np.asarray([0.98, 1.0, 1.02])
+    builder = DirectVBMPolarAtlasBuilder(nodes, spectrum_config=config, shard_size=2)
+    plain = adaptive_ring_spectrum(NearCausticRing(), 1.0, config, radial_guard_distance=0.01)
+    ring = builder._ring(NearCausticRing(), 1.0, 0.01)
+
+    assert not plain.converged and not plain.local_refined
+    assert ring.converged and ring.local_refined
 
 
 def test_map_frame_pspl_translation_matches_pointwise_trajectory() -> None:
@@ -290,3 +435,44 @@ def test_public_search_returns_score_without_chi2_bounds(tmp_path) -> None:
     assert np.isfinite(candidate.chi2)
     assert not hasattr(candidate, "chi2_lower")
     assert not hasattr(candidate, "chi2_upper")
+
+
+@pytest.mark.parametrize("isolate", [True, False])
+def test_vbm_multipoly_retries_a_nan_point(monkeypatch, isolate) -> None:
+    nan_x = 0.3
+
+    class FakeVbm:
+        Method = SimpleNamespace(Multipoly="multipoly")
+
+        def __init__(self):
+            self.Tol = self.RelTol = self.a1 = None
+
+        def Caustics(self, separation, mass_ratio):
+            return [np.asarray([[0.0, 0.01], [0.01, 0.0], [0.0, -0.01], [0.0, 0.01]])]
+
+        def SetMethod(self, method):
+            pass
+
+        def SetLensGeometry(self, geometry):
+            pass
+
+        def BinaryMag2(self, separation, mass_ratio, x, y, source_radius):
+            return 5.0
+
+        def MultiMag2(self, x, y, source_radius):
+            # VBM 5.6.1 also returns NaN, without aborting, at rare exact positions.
+            if x == nan_x and y == 0.0:
+                return float("nan")
+            return 2.0 + x
+
+    monkeypatch.setitem(
+        sys.modules, "VBMicrolensing", SimpleNamespace(VBMicrolensing=FakeVbm)
+    )
+    evaluator = VBMBinaryLensEvaluator(
+        1.0, 0.5, 0.01, coordinate_frame="native", method="multipoly",
+        isolate_multipoly=isolate,
+    )
+    x = np.asarray([0.1, 0.2, nan_x, 0.4])
+    values = evaluator.magnification(x, np.zeros_like(x))
+    np.testing.assert_allclose(values, 2.0 + x, rtol=0.0, atol=1.0e-9)
+    assert evaluator.crash_recoveries == 1

@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import json
 from numbers import Integral
+import os
 from pathlib import Path
 from typing import Literal, Protocol, Sequence
 
@@ -221,32 +222,55 @@ def _nonuniform_coefficients(
     ordinary trapezoid rule introduces when locally refined and coarse
     intervals coexist.
     """
+    return _nonuniform_coefficient_series(angles, (values,), m_max)[0]
+
+
+def _nonuniform_coefficient_series(
+    angles: np.ndarray, series: Sequence[np.ndarray], m_max: int
+) -> list[np.ndarray]:
+    """``_nonuniform_coefficients`` of several value series on shared angles.
+
+    The second derivative of a periodic piecewise-linear function is a sum of
+    impulses at the nodes, weighted by the slope jumps, so for m >= 1
+    ``c_m = -sum_k jump_k exp(-i m theta_k) / (2 pi m^2)``.  The phases come
+    from a recurrence shared by every series instead of a dense matrix of
+    complex exponentials.
+    """
     order = np.argsort(angles, kind="stable")
     angle = np.asarray(angles, dtype=np.float64)[order]
-    value = np.asarray(values, dtype=np.float64)[order]
-    if angle.ndim != 1 or value.shape != angle.shape or len(angle) < 3:
+    if angle.ndim != 1 or len(angle) < 3:
         raise ValueError("angles and values must be equal one-dimensional arrays")
     if np.any(np.diff(angle) <= 0.0):
         raise ValueError("non-uniform angular nodes must be unique")
     width = np.diff(np.concatenate((angle, [angle[0] + 2.0 * np.pi])))
-    right_value = np.roll(value, -1)
-    output = np.empty(m_max + 1, dtype=np.complex128)
-    output[0] = np.sum(0.5 * width * (value + right_value)) / (2.0 * np.pi)
-    if m_max:
-        modes = np.arange(1, m_max + 1, dtype=np.float64)
-        mh = width[:, None] * modes[None, :]
-        exponential = np.exp(-1j * mh)
-        j0 = (1.0 - exponential) / (1j * modes[None, :])
-        j1 = -width[:, None] * exponential / (1j * modes[None, :]) + j0 / (
-            1j * modes[None, :]
-        )
+    jumps = []
+    outputs = []
+    for values in series:
+        value = np.asarray(values, dtype=np.float64)
+        if value.shape != np.shape(angles):
+            raise ValueError("angles and values must be equal one-dimensional arrays")
+        value = value[order]
+        right_value = np.roll(value, -1)
         slope = (right_value - value) / width
-        phase = np.exp(-1j * angle[:, None] * modes[None, :])
-        output[1:] = np.sum(
-            phase * (value[:, None] * j0 + slope[:, None] * j1),
-            axis=0,
-        ) / (2.0 * np.pi)
-    return output
+        jumps.append(slope - np.roll(slope, 1))
+        output = np.empty(m_max + 1, dtype=np.complex128)
+        output[0] = np.sum(0.5 * width * (value + right_value)) / (2.0 * np.pi)
+        outputs.append(output)
+    if m_max:
+        weights = np.stack(jumps)
+        step = np.exp(-1j * angle)
+        sums = np.empty((len(outputs), m_max), dtype=np.complex128)
+        for index in range(m_max):
+            # Re-anchor the recurrence so its round-off cannot build up.
+            if index % 64 == 0:
+                phase = np.exp(-1j * (index + 1) * angle)
+            else:
+                phase *= step
+            sums[:, index] = weights @ phase
+        modes = np.arange(1, m_max + 1, dtype=np.float64)
+        for output, total in zip(outputs, sums):
+            output[1:] = -total / (2.0 * np.pi * modes * modes)
+    return outputs
 
 
 def _sample_angles(
@@ -433,8 +457,9 @@ def adaptive_ring_spectrum(
             angles = np.unique(np.round(np.mod(np.concatenate(local), 2 * np.pi), 14))
             values = values_for(angles)
             modes = min(diagnostic_m_max, max(config.m_max, uniform_n_phi // 2))
-            x_coeff = _nonuniform_coefficients(angles, values, modes)
-            x2_coeff = _nonuniform_coefficients(angles, values * values, modes)
+            x_coeff, x2_coeff = _nonuniform_coefficient_series(
+                angles, (values, values * values), modes
+            )
             x_error, x_scale = _coefficient_change(
                 previous_x, x_coeff, m_max=config.m_max
             )
@@ -507,8 +532,35 @@ def adaptive_ring_spectrum(
     )
 
 
+# MultiMag2 crashes (double free) near wide-binary central caustics before 5.6.1.
+_MULTIPOLY_MIN_VERSION = (5, 6, 1)
+_PROBE_ANGLES = 8
+# VBMicrolensing 5.6.1 MultiMag2 still frees image curves that OrderMultipleImages
+# later reads (heap use-after-free) at rare source positions, aborting the process.
+# The crash is specific to the exact position: a shift of 1e-10 rho avoids it.
+_CRASH_SHIFT = 1.0e-10
+_CRASH_DIRECTIONS = ((1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0))
+
+
+def _version_tuple(text: str) -> tuple[int, ...]:
+    parts = []
+    for part in text.split("."):
+        digits = "".join(character for character in part if character.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
 class VBMBinaryLensEvaluator:
-    """Vector-shaped adapter around scalar ``VBMicrolensing.BinaryMag2``."""
+    """Vector-shaped adapter around scalar VBMicrolensing finite-source calls.
+
+    ``method="auto"`` uses ``BinaryMag2`` unless a ring fails a probe.  Each new
+    ring radius is probed at a few uniform angles and at the angles nearest the
+    caustics with both ``BinaryMag2`` and the two-lens ``MultiMag2`` (Multipoly).
+    If they disagree by more than ``switch_rtol``, the whole ring uses
+    ``MultiMag2``.  ``BinaryMag2`` loses precision to round-off in the tiny
+    central caustic of wide binaries with large mass ratios: there it can be
+    wrong by tens of percent and take about a second per call.
+    """
 
     def __init__(
         self,
@@ -519,6 +571,9 @@ class VBMBinaryLensEvaluator:
         tolerance: float = 1.0e-3,
         relative_tolerance: float = 1.0e-4,
         coordinate_frame: Literal["map", "native"] = "map",
+        method: Literal["auto", "binary", "multipoly"] = "auto",
+        switch_rtol: float = 1.0e-4,
+        isolate_multipoly: bool | None = None,
     ) -> None:
         try:
             import VBMicrolensing
@@ -526,6 +581,17 @@ class VBMBinaryLensEvaluator:
             raise ImportError(
                 "VBMBinaryLensEvaluator requires the optional VBMicrolensing package"
             ) from error
+        if method not in ("auto", "binary", "multipoly"):
+            raise ValueError("method must be 'auto', 'binary' or 'multipoly'")
+        if not np.isfinite(switch_rtol) or switch_rtol <= 0.0:
+            raise ValueError("switch_rtol must be finite and positive")
+        installed = getattr(VBMicrolensing, "__version__", None)
+        if method != "binary" and installed is not None:
+            if _version_tuple(str(installed)) < _MULTIPOLY_MIN_VERSION:
+                raise ImportError(
+                    f"method={method!r} needs VBMicrolensing>=5.6.1 "
+                    f"(installed {installed}); use method='binary' instead"
+                )
         for name, value in (
             ("separation", separation),
             ("mass_ratio", mass_ratio),
@@ -550,6 +616,32 @@ class VBMBinaryLensEvaluator:
         self._vbm.Tol = float(tolerance)
         self._vbm.RelTol = float(relative_tolerance)
         self._vbm.a1 = 0.0
+        self.method = method
+        self.switch_rtol = float(switch_rtol)
+        # MultiMag2 runs in forked children so a VBM abort costs one point, not the run.
+        self.isolate_multipoly = (
+            hasattr(os, "fork") if isolate_multipoly is None else bool(isolate_multipoly)
+        )
+        if self.isolate_multipoly and not hasattr(os, "fork"):
+            raise ValueError("isolate_multipoly needs os.fork")
+        self.crash_recoveries = 0
+        self._ring_multipoly: dict[float, bool] = {}
+        self._multi = None
+        if method != "binary":
+            multi = VBMicrolensing.VBMicrolensing()
+            multi.Tol = float(tolerance)
+            multi.RelTol = float(relative_tolerance)
+            multi.a1 = 0.0
+            multi.SetMethod(VBMicrolensing.VBMicrolensing.Method.Multipoly)
+            # Native BinaryMag2 frame: centre of mass, secondary on the +x side.
+            q = self.mass_ratio
+            multi.SetLensGeometry(
+                [
+                    -self.separation * q / (1.0 + q), 0.0, 1.0 / (1.0 + q),
+                    self.separation / (1.0 + q), 0.0, q / (1.0 + q),
+                ]
+            )
+            self._multi = multi
         native_components = []
         for component in self._vbm.Caustics(self.separation, self.mass_ratio):
             array = np.asarray(component, dtype=np.float64)
@@ -570,25 +662,170 @@ class VBMBinaryLensEvaluator:
             else tuple(native_components)
         )
 
+    def _binary(self, x: float, y: float) -> float:
+        return self._vbm.BinaryMag2(
+            self.separation, self.mass_ratio, x, y, self.source_radius
+        )
+
+    def _multipoly(self, x: float, y: float) -> float:
+        return self._multi.MultiMag2(x, y, self.source_radius)
+
+    def _multipoly_child(self, xs: np.ndarray, ys: np.ndarray) -> tuple[np.ndarray, bool]:
+        """MultiMag2 values in a forked child, and whether the child was killed.
+
+        The child streams each value as it is computed, so the values returned
+        are those before the point that killed it.
+        """
+        read_end, write_end = os.pipe()
+        pid = os.fork()
+        if pid == 0:  # pragma: no cover - runs in the child
+            status = 0
+            try:
+                os.close(read_end)
+                try:  # an expected abort should not leave a core file behind
+                    import resource
+
+                    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+                except (ImportError, ValueError, OSError):
+                    pass
+                for x, y in zip(xs, ys):
+                    os.write(write_end, np.float64(self._multipoly(float(x), float(y))).tobytes())
+            except BaseException:
+                status = 1
+            finally:
+                os._exit(status)
+        os.close(write_end)
+        with os.fdopen(read_end, "rb") as stream:
+            data = stream.read()
+        _, status = os.waitpid(pid, 0)
+        count = len(data) // 8
+        return np.frombuffer(data[: 8 * count], dtype=np.float64).copy(), os.WIFSIGNALED(status)
+
+    def _multipoly_values(self, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
+        """MultiMag2 at native-frame points, surviving VBM aborts.
+
+        A point that kills the child, or where MultiMag2 returns a non-finite
+        value (5.6.1 also does that at rare exact positions), is evaluated at a
+        position shifted by ``_CRASH_SHIFT`` source radii (trying four
+        directions), and with BinaryMag2 if every shift also fails.
+        """
+        xs, ys = np.asarray(xs, dtype=np.float64), np.asarray(ys, dtype=np.float64)
+        if not self.isolate_multipoly:
+            values = np.fromiter(
+                (self._multipoly(float(x), float(y)) for x, y in zip(xs, ys)),
+                dtype=np.float64,
+                count=xs.size,
+            )
+        else:
+            values = self._isolated_multipoly_values(xs, ys)
+        for index in np.flatnonzero(~np.isfinite(values)):
+            values[index] = self._recover_crash(float(xs[index]), float(ys[index]))
+        return values
+
+    def _isolated_multipoly_values(self, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
+        values = np.empty(xs.size, dtype=np.float64)
+        start = 0
+        while start < xs.size:
+            done, killed = self._multipoly_child(xs[start:], ys[start:])
+            values[start : start + done.size] = done
+            start += done.size
+            if start == xs.size:
+                break
+            x, y = float(xs[start]), float(ys[start])
+            if not killed:
+                # A Python-level error: raise it here, with its traceback.
+                values[start] = self._multipoly(x, y)
+            else:
+                values[start] = self._recover_crash(x, y)
+            start += 1
+        return values
+
+    def _recover_crash(self, x: float, y: float) -> float:
+        self.crash_recoveries += 1
+        step = _CRASH_SHIFT * self.source_radius
+        for dx, dy in _CRASH_DIRECTIONS:
+            px, py = x + dx * step, y + dy * step
+            if self.isolate_multipoly:
+                done, _ = self._multipoly_child(np.array([px]), np.array([py]))
+            else:
+                done = np.array([self._multipoly(px, py)])
+            if done.size and np.isfinite(done[0]):
+                return float(done[0])
+        return self._binary(x, y)
+
+    def ring_uses_multipoly(self, radius: float) -> bool:
+        """Whether ``method="auto"`` switched the ring at this radius to MultiMag2."""
+        if self.method != "auto":
+            return self.method == "multipoly"
+        return self._ring_multipoly.get(round(float(radius), 12), False)
+
+    def force_multipoly(self, radius: float, enabled: bool = True) -> bool:
+        """Set an ``auto`` ring's method by hand; False if nothing changes.
+
+        The probe samples only a few points, so the atlas builder retries a
+        ring that still fails to converge on BinaryMag2 with MultiMag2.
+        """
+        key = round(float(radius), 12)
+        if self.method != "auto" or self._ring_multipoly.get(key, False) == enabled:
+            return False
+        self._ring_multipoly[key] = enabled
+        return True
+
+    def _probe_ring(self, radius: float) -> bool:
+        angles = 2.0 * np.pi * np.arange(_PROBE_ANGLES) / _PROBE_ANGLES
+        if self.caustic_components:
+            points = np.vstack(self.caustic_components)
+            distance = np.abs(np.hypot(points[:, 0], points[:, 1]) - radius)
+            nearest = points[np.argsort(distance)[:_PROBE_ANGLES]]
+            angles = np.concatenate(
+                (angles, np.arctan2(nearest[:, 1], nearest[:, 0]))
+            )
+        xs = radius * np.cos(angles) + self._shift_x
+        ys = radius * np.sin(angles)
+        multi = self._multipoly_values(xs, ys)
+        for x, y, value in zip(xs, ys, multi):
+            if abs(self._binary(float(x), float(y)) - value) > self.switch_rtol * abs(value):
+                return True
+        return False
+
     def magnification(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
         x, y = np.broadcast_arrays(
             np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64)
         )
         shape = x.shape
-        output = np.fromiter(
-            (
-                self._vbm.BinaryMag2(
-                    self.separation,
-                    self.mass_ratio,
-                    float(local_x + self._shift_x),
-                    float(local_y),
-                    self.source_radius,
-                )
-                for local_x, local_y in zip(x.ravel(), y.ravel())
-            ),
-            dtype=np.float64,
-            count=x.size,
-        )
+        flat_x, flat_y = x.ravel(), y.ravel()
+        if self.method == "binary":
+            function = self._binary
+        elif self.method == "multipoly":
+            function = self._multipoly
+        else:
+            # Calls come one ring (one radius) at a time; anything else is probed per point.
+            radii = np.round(np.hypot(flat_x, flat_y), 12)
+            if radii.size and np.all(radii == radii[0]):
+                key = float(radii[0])
+                if key not in self._ring_multipoly:
+                    self._ring_multipoly[key] = self._probe_ring(key)
+                function = self._multipoly if self._ring_multipoly[key] else self._binary
+            else:
+                function = None
+        if function == self._multipoly:
+            output = self._multipoly_values(flat_x + self._shift_x, flat_y)
+        elif function is None:
+            multi = self._multipoly_values(flat_x + self._shift_x, flat_y)
+            binary = np.array(
+                [self._binary(float(x + self._shift_x), float(y)) for x, y in zip(flat_x, flat_y)],
+                dtype=np.float64,
+            )
+            output = np.where(np.abs(binary - multi) > self.switch_rtol * np.abs(multi), multi, binary)
+        else:
+            output = np.fromiter(
+                (
+                    function(float(local_x + self._shift_x), float(local_y))
+                    for local_x, local_y in zip(flat_x, flat_y)
+                ),
+                dtype=np.float64,
+                count=x.size,
+            )
         return output.reshape(shape)
 
 
@@ -650,25 +887,72 @@ class DirectVBMPolarAtlasBuilder(PolarAtlasBuilder):
             )
         return np.maximum.reduce(list(by_order.values())), by_order
 
+    def _ring(
+        self, evaluator: RingMagnificationEvaluator, radius: float, guard: float
+    ) -> DirectRingSpectrum:
+        ring = adaptive_ring_spectrum(
+            evaluator, radius, self.spectrum_config, radial_guard_distance=guard
+        )
+        if not ring.converged:
+            # Either a caustic just outside the guard makes peaks narrower than
+            # the uniform grid resolves, or the refined window is too narrow
+            # for a large caustic: widen the guard (reaching the caustic) once.
+            components = tuple(evaluator.caustic_components)
+            if components and radius > float(evaluator.source_radius):
+                points = np.vstack(components)
+                reach = max(
+                    1.5
+                    * float(
+                        np.min(np.abs(np.hypot(points[:, 0], points[:, 1]) - radius))
+                    ),
+                    4.0 * guard if ring.local_refined else 0.0,
+                )
+                if reach > guard:
+                    widened = adaptive_ring_spectrum(
+                        evaluator,
+                        radius,
+                        self.spectrum_config,
+                        radial_guard_distance=reach,
+                    )
+                    if widened.converged or (
+                        widened.normalized_coefficient_error
+                        < ring.normalized_coefficient_error
+                    ):
+                        ring, guard = widened, reach
+        force = getattr(evaluator, "force_multipoly", None)
+        if ring.converged or force is None or not force(radius):
+            return ring
+        retry = adaptive_ring_spectrum(
+            evaluator, radius, self.spectrum_config, radial_guard_distance=guard
+        )
+        if retry.converged or (
+            retry.normalized_coefficient_error <= ring.normalized_coefficient_error
+        ):
+            return retry
+        # MultiMag2 did no better; keep the BinaryMag2 ring and record it so.
+        force(radius, enabled=False)
+        return ring
+
     def sample(self, evaluator: RingMagnificationEvaluator) -> dict[str, np.ndarray]:
         radial_guard = np.empty_like(self.radial_nodes)
         radial_guard[0] = 0.5 * (self.radial_nodes[1] - self.radial_nodes[0])
         radial_guard[-1] = 0.5 * (self.radial_nodes[-1] - self.radial_nodes[-2])
         radial_guard[1:-1] = 0.25 * (self.radial_nodes[2:] - self.radial_nodes[:-2])
         rings = [
-            adaptive_ring_spectrum(
-                evaluator,
-                radius,
-                self.spectrum_config,
-                radial_guard_distance=float(radial_guard[index]),
-            )
+            self._ring(evaluator, radius, float(radial_guard[index]))
             for index, radius in enumerate(self.radial_nodes)
         ]
+        ring_method = getattr(evaluator, "ring_uses_multipoly", None)
+        vbm_multipoly = np.asarray(
+            [bool(ring_method(radius)) if ring_method else False for radius in self.radial_nodes],
+            dtype=bool,
+        )
         exact_x = np.stack([item.x_coeff for item in rings])
         stored_x = exact_x.astype(self.coefficient_dtype)
         if not self.spectrum_config.build_radial_certificate:
             self._map_diagnostics.append(
                 {
+                    "vbm_multipoly": vbm_multipoly,
                     "evaluations": np.asarray(
                         [item.evaluations for item in rings], dtype=np.int32
                     ),
@@ -742,12 +1026,7 @@ class DirectVBMPolarAtlasBuilder(PolarAtlasBuilder):
             2**self.spectrum_config.radial_certificate_levels - 1,
         )
         holdout_rings = [
-            adaptive_ring_spectrum(
-                evaluator,
-                radius,
-                self.spectrum_config,
-                radial_guard_distance=0.5 * float(holdout_width[index]),
-            )
+            self._ring(evaluator, radius, 0.5 * float(holdout_width[index]))
             for index, radius in enumerate(holdout_radii)
         ]
         holdout_x = np.stack([item.x_coeff for item in holdout_rings])
@@ -782,6 +1061,7 @@ class DirectVBMPolarAtlasBuilder(PolarAtlasBuilder):
         )
         self._map_diagnostics.append(
             {
+                "vbm_multipoly": vbm_multipoly,
                 "evaluations": np.asarray(
                     [item.evaluations for item in rings], dtype=np.int32
                 ),
@@ -891,6 +1171,7 @@ class DirectVBMPolarAtlasBuilder(PolarAtlasBuilder):
             "stored_ring_vbm_evaluations": stored_evaluations,
             "unconverged_rings": int(np.sum(~diagnostics["converged"])),
             "caustic_guarded_rings": int(np.sum(diagnostics["caustic_guarded"])),
+            "vbm_multipoly_rings": int(np.sum(diagnostics["vbm_multipoly"])),
             "max_normalized_coefficient_error": float(
                 np.max(diagnostics["normalized_coefficient_error"])
             ),
