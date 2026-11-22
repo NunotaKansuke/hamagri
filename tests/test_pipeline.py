@@ -2,6 +2,7 @@ import json
 import math
 
 import numpy as np
+import pytest
 
 from hamagri._core.trajectory import PhotometricDataset
 from hamagri.pipeline import EventModel, geometry_stencil, lm
@@ -48,7 +49,8 @@ def test_geometry_stencil_has_sixteen_points():
     assert len(stencil) == 16 and stencil[0].t0 == 0.0 and stencil[0].tE == 20.0
 
 
-def test_lm_recovers_a_binary(tmp_path):
+def test_lm_recovers_a_binary():
+    pytest.importorskip("VBMicrolensing")
     model = EventModel((_dataset(),))
     assert model.chi2(TRUE) < 700
     start = {**TRUE, "s": 1.105, "q": 3.3e-3, "alpha": 1.01, "t0": 0.05}
@@ -57,7 +59,8 @@ def test_lm_recovers_a_binary(tmp_path):
 
 
 def test_load_event(tmp_path):
-    data = _dataset()
+    time = np.linspace(-40.0, 40.0, 50)
+    data = PhotometricDataset(time, 1.0 + np.exp(-time ** 2 / 50.0), np.full_like(time, 0.01))
     np.savetxt(tmp_path / "w146.txt", np.column_stack([data.time, data.flux, data.error]))
     (tmp_path / "event.json").write_text(json.dumps({
         "pspl": [0.0, 0.05, 20.0], "datasets": [{"path": "w146.txt"}]}))
