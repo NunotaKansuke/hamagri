@@ -17,15 +17,50 @@
    best solutions are then profiled in rho (x0.7, x0.35, x1.5) and in u0
    (+-rho), and each profile point is re-polished.
 5. **Free parallax.** With a parallax set-up, steps 1-4 hold piE fixed at
-   the value you supply (a host-star or point-lens estimate), applied as a
-   per-epoch trajectory offset, so the FFT scan remains exact. Every distinct
-   fit is then refit with piE free; where the fixed-piE fit is better, it is
-   kept.
+   the value you supply and the last step frees it
+   (see [Parallax](#parallax-pie)).
 
 Solutions within `solution_dchi2` (25) of the best are reported as distinct.
 Two fits count as the same solution when `|d ln s| < 0.1`, `|d ln q| < 0.7`,
 `|d alpha| < 0.2` and u0 has the same sign, with `q > 1` mapped to
 `(1/q, alpha + pi)` first.
+
+## Roman
+
+The pipeline was developed and tuned on simulated light curves from the
+Roman Galactic Bulge Time Domain Survey (15-min cadence, W146 photometry,
+events with tE of days to months), searched over the Roman-extended atlas
+([Atlas data](atlas-data.md#roman-additions)). The `Settings` defaults, the
+16-point stencil and the m_max = 128 scan are those choices. Other surveys
+should work with the same code, but the search budget (`wall_budget`,
+`population`, `hills`) may need adjusting for very different cadence or
+noise.
+
+## Parallax (piE)
+
+Roman observes from a halo orbit around L2, and annual parallax is often
+measurable over its 72-day seasons. The pipeline handles piE in two stages:
+
+- **Fixed piE during the scan and the search.** Supply one value
+  `piE = (piEN, piEE)`, for example from a host-star estimate (lens
+  brightness and the source/lens proper motion) or from a point-lens fit
+  with parallax. Use `(0, 0)` if nothing is known. At fixed piE, parallax is
+  a per-epoch shift `(dtau, dbeta)` of the source trajectory that does not
+  depend on the binary parameters. It is applied to the data before the FFT
+  scan, so the alpha FFT remains exact, and the battle and the polish use the
+  same fixed value. Because parallax breaks the (u0, alpha) -> (-u0, -alpha)
+  symmetry, each hill is searched together with its mirror image.
+- **Free piE at the end.** Every distinct polished and profiled fit is
+  refit with piEN and piEE free (up to 400 evaluations). The fixed-piE fit is
+  kept wherever it is still better, so a poor starting piE cannot make the
+  result worse. Fits with opposite u0 signs (the ecliptic degeneracy) are
+  reported as separate solutions; fits that differ only in piE are not.
+
+For Roman, use a satellite table for the observer:
+`Parallax(ra_deg, dec_deg, t_ref, satellite=1, satellite_dir=...)` with
+`satellite1.txt` in VBMicrolensing's format (a JPL Horizons ephemeris of
+Roman). `t_ref` is VBMicrolensing's `t0_par`, held fixed, usually near the
+peak.
 
 ## Python
 
