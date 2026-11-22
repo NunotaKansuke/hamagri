@@ -58,6 +58,7 @@ def _specs(rows: np.ndarray, config: MapConfig) -> Iterable[MapBuildSpec]:
                 tolerance=config.vbm_tolerance,
                 relative_tolerance=config.vbm_relative_tolerance,
                 coordinate_frame=config.coordinate_frame,
+                method=config.vbm_method,
             ),
         )
 
@@ -103,6 +104,7 @@ def _pilot_evaluators(rows: np.ndarray, config: MapConfig):
             tolerance=config.vbm_tolerance,
             relative_tolerance=config.vbm_relative_tolerance,
             coordinate_frame=config.coordinate_frame,
+            method=config.vbm_method,
         )
         for _, logs, logq, logrho in pilot_rows
     ]

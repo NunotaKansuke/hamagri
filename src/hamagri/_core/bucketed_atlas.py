@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+import os
 from os import replace
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -400,6 +401,10 @@ def write_bucket_manifest(
     ) as handle:
         handle.write(json.dumps(payload, indent=2) + "\n")
         temporary = Path(handle.name)
+    # NamedTemporaryFile creates the file 0600; give the manifest the usual umask mode.
+    umask = os.umask(0)
+    os.umask(umask)
+    temporary.chmod(0o666 & ~umask)
     replace(temporary, manifest)
     return manifest
 

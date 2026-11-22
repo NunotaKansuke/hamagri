@@ -22,6 +22,11 @@ class PhotometricDataset:
     flux: np.ndarray
     error: np.ndarray
     name: str = ""
+    # Per-epoch source-position offset ``(dtau, dbeta)``, shape ``(n, 2)``,
+    # added to ``((t - t0) / tE, u0)`` before the rotation by alpha.  Parallax
+    # at fixed piE has this form: it depends on the observer and piE only, so
+    # one array serves every geometry and the alpha FFT is unchanged.
+    trajectory_offset: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         time = np.asarray(self.time, dtype=np.float64)
@@ -38,6 +43,11 @@ class PhotometricDataset:
         object.__setattr__(self, "time", time)
         object.__setattr__(self, "flux", flux)
         object.__setattr__(self, "error", error)
+        if self.trajectory_offset is not None:
+            offset = np.asarray(self.trajectory_offset, dtype=np.float64)
+            if offset.shape != (time.size, 2) or not np.all(np.isfinite(offset)):
+                raise ValueError("trajectory_offset must be a finite (n, 2) array")
+            object.__setattr__(self, "trajectory_offset", offset)
 
 
 @dataclass(frozen=True)
@@ -118,12 +128,20 @@ class TrajectoryBasis:
         return int(self.angular.shape[1]) - 1
 
 
-def radial_coordinates(time: np.ndarray, geometry: PSPLGeometry) -> tuple[np.ndarray, np.ndarray]:
+def radial_coordinates(
+    time: np.ndarray,
+    geometry: PSPLGeometry,
+    offset: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     geometry.validate()
     tau = (np.asarray(time, dtype=np.float64) - geometry.t0) / geometry.tE
-    radius = np.hypot(tau, geometry.u0)
+    beta = np.full_like(tau, geometry.u0)
+    if offset is not None:
+        tau = tau + offset[:, 0]
+        beta = beta + offset[:, 1]
+    radius = np.hypot(tau, beta)
     # This phase matches x=-tau, y=-u0 at alpha=0 in the released C scorer.
-    phase = np.arctan2(-geometry.u0, -tau)
+    phase = np.arctan2(-beta, -tau)
     return radius, phase
 
 
@@ -160,7 +178,7 @@ def build_trajectory_basis(
     validate_radial_order(radial_order)
     if m_max < 0:
         raise ValueError("m_max must be nonnegative")
-    radius, phase = radial_coordinates(dataset.time, geometry)
+    radius, phase = radial_coordinates(dataset.time, geometry, dataset.trajectory_offset)
     weight = 1.0 / dataset.error**2
     ascending = np.argsort(radius, kind="stable")
     radius = radius[ascending]
@@ -187,7 +205,7 @@ def build_event_kernel(
     *,
     radial_order: int = DEFAULT_RADIAL_ORDER,
 ) -> EventKernel:
-    radius, phase = radial_coordinates(dataset.time, geometry)
+    radius, phase = radial_coordinates(dataset.time, geometry, dataset.trajectory_offset)
     # Ascending radius makes every stencil column's indices monotonic.
     ascending = np.argsort(radius, kind="stable")
     radius = radius[ascending]

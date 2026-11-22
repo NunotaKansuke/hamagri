@@ -54,6 +54,11 @@ def direct_chi2(
         x, y = trajectory_xy(
             dataset.time, geometry.t0, geometry.u0, geometry.tE, alpha
         )
+        if dataset.trajectory_offset is not None:
+            # trajectory_xy is R(alpha) applied to (-tau, -u0).
+            dtau, dbeta = dataset.trajectory_offset.T
+            x = x + dbeta * np.sin(alpha) - dtau * np.cos(alpha)
+            y = y - dbeta * np.cos(alpha) - dtau * np.sin(alpha)
         total += profile_flux(evaluator.magnification(x, y), dataset).chi2
     return total
 
@@ -73,8 +78,12 @@ def direct_alpha_scan(
     cos_alpha = np.cos(alphas)[:, None]
     for dataset in datasets:
         tau = (dataset.time - geometry.t0) / geometry.tE
-        x_position = geometry.u0 * sin_alpha - tau[None, :] * cos_alpha
-        y_position = -geometry.u0 * cos_alpha - tau[None, :] * sin_alpha
+        beta = np.full_like(tau, geometry.u0)
+        if dataset.trajectory_offset is not None:
+            tau = tau + dataset.trajectory_offset[:, 0]
+            beta = beta + dataset.trajectory_offset[:, 1]
+        x_position = beta[None, :] * sin_alpha - tau[None, :] * cos_alpha
+        y_position = -beta[None, :] * cos_alpha - tau[None, :] * sin_alpha
         design = evaluator.magnification(x_position, y_position) - 1.0
         weight = 1.0 / dataset.error**2
         weight_sum = np.sum(weight)

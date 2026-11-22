@@ -72,3 +72,18 @@ def test_grouped_moments_are_skipped_for_cubic_stencils() -> None:
         _datasets(), [PSPLGeometry(0.0, 0.1, 1.0)], 4, radial_order=3
     )
     assert factory._moments is None
+
+
+def test_constant_trajectory_offset_is_a_geometry_shift() -> None:
+    from hamagri._core.trajectory import radial_coordinates
+
+    time = np.linspace(-3.0, 3.0, 41)
+    geometry = PSPLGeometry(t0=0.2, u0=0.15, tE=1.7)
+    offset = np.tile([0.3, -0.05], (time.size, 1))
+    shifted = PSPLGeometry(t0=0.2 - 0.3 * 1.7, u0=0.15 - 0.05, tE=1.7)
+    for actual, expected in zip(
+        radial_coordinates(time, geometry, offset), radial_coordinates(time, shifted)
+    ):
+        np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1e-14)
+    with pytest.raises(ValueError, match="trajectory_offset"):
+        PhotometricDataset(time, np.ones_like(time), np.ones_like(time), trajectory_offset=offset[:-1])
